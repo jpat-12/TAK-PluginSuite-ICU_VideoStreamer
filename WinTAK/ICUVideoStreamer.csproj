@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
+          Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{CBE246FC-BD6D-44FA-B7CA-1D75175F30AF}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>ICUVideoStreamer</RootNamespace>
+    <AssemblyName>ICUVideoStreamer</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <TargetFrameworkProfile />
+  </PropertyGroup>
+
+  <!-- WinTAK DLLs are AMD64 — must target x64 -->
+  <PropertyGroup>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseSharedCompilation>false</UseSharedCompilation>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\x64\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\x64\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Standard .NET / WPF references -->
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System" />
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Xml" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <!--
+    WinTAK SDK DLLs — copied from D:\Apps\ into libs\
+    (libs\ is git-ignored; populate by running: copy-libs.ps1)
+  -->
+  <ItemGroup>
+    <Reference Include="WinTak.Framework">
+      <HintPath>libs\WinTak.Framework.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="WinTak.Common">
+      <HintPath>libs\WinTak.Common.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="WinTak.CursorOnTarget">
+      <HintPath>libs\WinTak.CursorOnTarget.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="WinTak.Net">
+      <HintPath>libs\WinTak.Net.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="WinTak.Alerts">
+      <HintPath>libs\WinTak.Alerts.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="TAK.Engine">
+      <HintPath>libs\TAK.Engine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Prism">
+      <HintPath>libs\Prism.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Prism.Mef.Wpf">
+      <HintPath>libs\Prism.Mef.Wpf.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Prism.Wpf">
+      <HintPath>libs\Prism.Wpf.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Windows.Interactivity">
+      <HintPath>libs\System.Windows.Interactivity.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.Practices.ServiceLocation">
+      <HintPath>libs\Microsoft.Practices.ServiceLocation.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Cot\CotBuilder.cs" />
+    <Compile Include="Models\AppSettings.cs" />
+    <Compile Include="Services\CameraPreviewService.cs" />
+    <Compile Include="Services\CotService.cs" />
+    <Compile Include="Services\KlvService.cs" />
+    <Compile Include="Services\TsWriter.cs" />
+    <Compile Include="Services\StreamingService.cs" />
+    <Compile Include="SettingsWindow.xaml.cs">
+      <DependentUpon>SettingsWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="VideoStreamButton.cs" />
+    <Compile Include="VideoStreamDockPane.cs" />
+    <Compile Include="VideoStreamModule.cs" />
+    <Compile Include="VideoStreamView.xaml.cs">
+      <DependentUpon>VideoStreamView.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Properties\AssemblyInfo.cs">
+      <SubType>Code</SubType>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="assets\airplane.png" />
+    <Resource Include="assets\Large.png" />
+    <Resource Include="assets\Small.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="ffmpeg\ffmpeg.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Include="SettingsWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="VideoStreamView.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+
+  <!--
+    Post-build (Debug only): copy DLL into the local WinTAK Plugins folder for live testing.
+    WinTAK scans D:\Apps\Plugins\ for DLL files at startup.
+  -->
+  <Target Name="DeployPlugin" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Debug'">
+    <PropertyGroup>
+      <PluginDir>D:\Apps\Plugins\</PluginDir>
+    </PropertyGroup>
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb"
+          DestinationFolder="$(PluginDir)"
+          Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Copy SourceFiles="$(TargetDir)ffmpeg\ffmpeg.exe"
+          DestinationFolder="$(PluginDir)ffmpeg\"
+          Condition="Exists('$(TargetDir)ffmpeg\ffmpeg.exe')" />
+  </Target>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

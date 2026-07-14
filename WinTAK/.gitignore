@@ -1,0 +1,30 @@
+# Build output
+bin/
+obj/
+
+# WinTAK SDK DLLs (copy from D:\Apps\ via copy-libs.ps1)
+libs/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docobj
+
+# Rider
+.idea/
+
+# Logs & temp
+*.log
+*.tmp
+
+# Secrets / local config
+*.pfx
+*.p12
+*.pem
+
+# Bundled FFmpeg binary — large binary, not tracked in git.
+# Download via: Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+# Extract bin/ffmpeg.exe -> ffmpeg/ffmpeg.exe
+ffmpeg/
