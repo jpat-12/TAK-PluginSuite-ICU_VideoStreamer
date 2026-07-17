@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace ICUVideoStreamer.Services
+namespace ICUVideoStreamer.Klv
 {
     /// <summary>
     /// Wraps raw MISB ST 0601 KLV packets in a minimal MPEG-TS byte stream.

@@ -130,13 +130,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Capture\CameraPreviewService.cs" />
+    <Compile Include="Capture\EncoderConfig.cs" />
+    <Compile Include="Capture\PreviewRenderer.cs" />
     <Compile Include="Cot\CotBuilder.cs" />
+    <Compile Include="Klv\KlvService.cs" />
+    <Compile Include="Klv\TsWriter.cs" />
     <Compile Include="Models\AppSettings.cs" />
-    <Compile Include="Services\CameraPreviewService.cs" />
-    <Compile Include="Services\CotService.cs" />
-    <Compile Include="Services\KlvService.cs" />
-    <Compile Include="Services\TsWriter.cs" />
-    <Compile Include="Services\StreamingService.cs" />
+    <Compile Include="Serve\MediaServerConfig.cs" />
+    <Compile Include="Serve\StreamingService.cs" />
+    <Compile Include="Share\SnapshotMarker.cs" />
+    <Compile Include="Share\StreamSensorMarker.cs" />
+    <Compile Include="Util\NetworkUtils.cs" />
     <Compile Include="SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>
@@ -175,6 +180,13 @@
     </Page>
   </ItemGroup>
 
+  <!-- WPK packaging metadata -->
+  <PropertyGroup>
+    <WpkVersion>1.0</WpkVersion>
+    <WpkName>ICUVideoStreamer-$(WpkVersion)-5.6.0.151</WpkName>
+    <WpkOut>$(OutputPath)$(WpkName).wpk</WpkOut>
+  </PropertyGroup>
+
   <!--
     Post-build (Debug only): copy DLL into the local WinTAK Plugins folder for live testing.
     WinTAK scans D:\Apps\Plugins\ for DLL files at startup.
@@ -191,6 +203,12 @@
     <Copy SourceFiles="$(TargetDir)ffmpeg\ffmpeg.exe"
           DestinationFolder="$(PluginDir)ffmpeg\"
           Condition="Exists('$(TargetDir)ffmpeg\ffmpeg.exe')" />
+  </Target>
+
+  <!-- Release: package as a WinTAK .wpk (manifest + DLL + bundled ffmpeg + icon). -->
+  <Target Name="PackageWpk" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\build-wpk.ps1&quot; -Version $(WpkVersion) -SdkVersion 5.6.0.151 -DllPath &quot;$(TargetPath)&quot; -FfmpegPath &quot;$(TargetDir)ffmpeg\ffmpeg.exe&quot; -IconPath &quot;$(MSBuildProjectDirectory)\assets\Large.png&quot; -ManifestPath &quot;$(MSBuildProjectDirectory)\MANIFEST.xml&quot; -OutPath &quot;$(WpkOut)&quot;" />
+    <Message Text="Plugin package: $(WpkOut)" Importance="high" />
   </Target>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

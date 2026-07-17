@@ -100,7 +100,8 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
         setupPreview();
 
-        Prefs.load(pluginContext, serverConfig, config);
+        // Seed the stream path from the operator's callsign so streams don't collide.
+        Prefs.load(pluginContext, serverConfig, config, deviceCallsign());
         refreshDestBadge();
 
         broadcastButton.setOnClickListener(v -> toggleBroadcast());
@@ -604,6 +605,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
     /** Host ATAK Activity context (holds the CAMERA permission, not the plugin). */
     private Context atakContext() { return getMapView().getContext(); }
+
+    /** The operator's ATAK callsign (used to seed a per-operator stream path). */
+    private String deviceCallsign() {
+        try { return getMapView().getDeviceCallsign(); } catch (Exception e) { return null; }
+    }
 
     // ── DropDown lifecycle ───────────────────────────────────────────────────────
 

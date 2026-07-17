@@ -8,9 +8,12 @@ namespace ICUVideoStreamer
     [Button("ICUVideoStreamer_VideoStreamButton", "ICU VideoStreamer",
         LargeImage = "pack://application:,,,/ICUVideoStreamer;component/assets/Large.png",
         SmallImage = "pack://application:,,,/ICUVideoStreamer;component/assets/Small.png",
+        // Home tab, "Tools" section — next to WinTAK's Video Player. Plugins must use the
+        // literal display names (WinTAK's own RadioControls button uses "Home"/"Tools");
+        // the internal resource keys ("HomeTab"/"ToolsTabGroup") make a separate tab/group.
         Tab        = "Home",
-        TabGroup   = "VISTA Tools",
-        ToolTip    = "Open the Video Stream plugin")]
+        TabGroup   = "Tools",
+        ToolTip    = "Open the ICU VideoStreamer plugin")]
     [Export(typeof(Button))]
     public class VideoStreamButton : Button
     {

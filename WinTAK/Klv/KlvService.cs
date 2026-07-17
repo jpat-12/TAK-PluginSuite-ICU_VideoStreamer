@@ -4,7 +4,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Threading;
 
-namespace ICUVideoStreamer.Services
+namespace ICUVideoStreamer.Klv
 {
     // Encodes MISB ST 0601.17 Local Data Set packets matching the 16 confirmed tags
     // sent by the TAK ICU Android app (PAR Government Systems Gv2F SDK).

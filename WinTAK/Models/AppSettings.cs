@@ -5,9 +5,19 @@ using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Text;
+using ICUVideoStreamer.Capture;
+using ICUVideoStreamer.Serve;
 
 namespace ICUVideoStreamer.Models
 {
+    /// <summary>
+    /// Persisted plugin settings. Mirrors the ATAK plugin's <c>util/Prefs</c> role:
+    /// it stores the <see cref="MediaServerConfig"/> (destination) and
+    /// <see cref="EncoderConfig"/> (capture) plus the WinTAK-specific extras (FFmpeg
+    /// path, codec, audio, recording, KLV sensor metadata). JSON at
+    /// <c>%AppData%\ICU-VideoStreamer\settings.json</c>; the server password is
+    /// DPAPI-encrypted at rest.
+    /// </summary>
     [DataContract]
     public class AppSettings
     {
@@ -15,128 +25,121 @@ namespace ICUVideoStreamer.Models
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "ICU-VideoStreamer", "settings.json");
 
-        // Stream
-        [DataMember] public string StreamProtocol { get; set; } = "RTMP";
-        [DataMember] public string StreamUrl      { get; set; } = "rtmp://localhost/live";
-        [DataMember] public string StreamKey      { get; set; } = "stream";
-        [DataMember] public string StreamUsername { get; set; } = "";
-        [DataMember] public bool   UseTls         { get; set; } = false;
-        [DataMember] public string CertificatePath{ get; set; } = "";
+        // ── Destination (MediaServerConfig) ────────────────────────────────────────
+        [DataMember] public string Alias        { get; set; } = "VIDEO_1";
+        [DataMember] public string Destination  { get; set; } = "SERVER"; // LAN | SERVER
+        [DataMember] public string PushProtocol { get; set; } = "RTSP";   // RTMP | RTSP | SRT
+        [DataMember] public string ServerHost   { get; set; } = "";
+        [DataMember] public int    ServerPort   { get; set; } = 8554;
+        [DataMember] public string StreamPath   { get; set; } = "icu";
+        [DataMember] public string ServerUsername { get; set; } = "";
 
-        // Credentials — stored DPAPI-encrypted; runtime prop is NOT serialized
-        [DataMember] public string StreamPasswordProtected { get; set; } = "";
+        // Server password — stored DPAPI-encrypted; runtime prop is NOT serialized.
+        [DataMember] public string ServerPasswordProtected { get; set; } = "";
+        public string ServerPassword { get; set; } = "";
 
-        public string StreamPassword { get; set; } = "";
+        // ── Capture (EncoderConfig) ────────────────────────────────────────────────
+        [DataMember] public string Resolution      { get; set; } = "P720"; // P480 | P720 | P1080
+        [DataMember] public int    VideoBitrate    { get; set; } = 2000;
+        [DataMember] public int    FrameRate       { get; set; } = 30;
+        [DataMember] public int    RotationDegrees { get; set; } = 0;
 
-        // Video
+        // ── Source ─────────────────────────────────────────────────────────────────
         [DataMember] public string VideoDevice       { get; set; } = "";
-        [DataMember] public string VideoCodec        { get; set; } = "H264";
-        [DataMember] public int    VideoBitrate      { get; set; } = 2000;
-        [DataMember] public string Resolution        { get; set; } = "1280x720";
-        [DataMember] public int    FrameRate         { get; set; } = 30;
-        [DataMember] public bool   EnableRecording   { get; set; } = false;
-        [DataMember] public string RecordingPath     { get; set; } = "";
         [DataMember] public bool   EnableScreenShare { get; set; } = false;
 
-        // Audio
-        [DataMember] public string AudioDevice  { get; set; } = "";
-        [DataMember] public string AudioCodec   { get; set; } = "AAC";
-        [DataMember] public int    AudioBitrate { get; set; } = 128;
-        [DataMember] public bool   MuteAudio    { get; set; } = false;
+        // ── Codec / audio / recording ──────────────────────────────────────────────
+        [DataMember] public string VideoCodec      { get; set; } = "H264"; // H264 | H265 | AV1
+        [DataMember] public string AudioDevice     { get; set; } = "";
+        [DataMember] public string AudioCodec      { get; set; } = "AAC";  // AAC | OPUS | G711
+        [DataMember] public int    AudioBitrate    { get; set; } = 128;
+        [DataMember] public bool   MuteAudio       { get; set; } = false;
+        [DataMember] public bool   EnableRecording { get; set; } = false;
+        [DataMember] public string RecordingPath   { get; set; } = "";
 
-        // KLV / Sensor Metadata — matches MISB ST 0601 fields sent by TAK ICU
+        // ── KLV / sensor metadata (MISB ST 0601) ───────────────────────────────────
         [DataMember] public string SensorName { get; set; } = "WinTAK-ICU";
-        [DataMember] public double SensorHFov { get; set; } = 60.0;  // Tag 16, degrees
-        [DataMember] public double SensorVFov { get; set; } = 34.0;  // Tag 17, degrees
+        [DataMember] public double SensorHFov { get; set; } = 60.0;
+        [DataMember] public double SensorVFov { get; set; } = 34.0;
 
-        // Identity — UID persisted so it's stable across restarts; callsign comes from WinTAK at runtime
-        [DataMember] public string Uid { get; set; } = "";
-
-        // FFmpeg — empty means use the bundled binary resolved at runtime
+        // ── Identity / tooling ─────────────────────────────────────────────────────
+        [DataMember] public string Uid        { get; set; } = "";
         [DataMember] public string FfmpegPath { get; set; } = "";
 
-        // Bundled ffmpeg.exe lives next to the plugin DLL in a ffmpeg\ subfolder.
-        public static readonly string BundledFfmpegPath = Path.Combine(
-            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
-            "ffmpeg", "ffmpeg.exe");
+        // ── FFmpeg resolution ──────────────────────────────────────────────────────
+        private static readonly string AsmDir =
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
-        public string ResolvedFfmpegPath =>
-            !string.IsNullOrWhiteSpace(FfmpegPath) && File.Exists(FfmpegPath)
-                ? FfmpegPath
-                : BundledFfmpegPath;
+        // Preferred bundled location (ffmpeg\ffmpeg.exe next to the plugin DLL).
+        public static readonly string BundledFfmpegPath = Path.Combine(AsmDir, "ffmpeg", "ffmpeg.exe");
+        // Fallback if the package extractor flattened the ffmpeg folder.
+        private static readonly string BundledFfmpegFlat = Path.Combine(AsmDir, "ffmpeg.exe");
 
-        // ── Derived URLs ─────────────────────────────────────────────────────────
-
-        /// <summary>Full URL passed to FFmpeg — includes injected credentials.</summary>
-        public string FullStreamUrl
+        public string ResolvedFfmpegPath
         {
             get
             {
-                string proto = (StreamProtocol ?? "").ToUpperInvariant();
-
-                // Build base URL + stream key for all protocols
-                string baseUrl = (StreamUrl ?? "").TrimEnd('/');
-                string streamKey = StreamKey ?? "";
-                string fullUrl = string.IsNullOrEmpty(streamKey)
-                    ? baseUrl
-                    : baseUrl + "/" + streamKey;
-
-                // Inject credentials using the correct format per protocol:
-                // RTSP uses standard userinfo in the URL (rtsp://user:pass@host/path)
-                // RTMP/SRT/others use MediaMTX query-string format (?user=X&pass=Y)
-                if (!string.IsNullOrEmpty(StreamUsername) && !string.IsNullOrEmpty(StreamPassword))
-                {
-                    string p = proto;
-                    if (p == "RTSP" || p == "RTSPS")
-                    {
-                        // FFmpeg publishes via RTSP ANNOUNCE + digest auth challenge-response.
-                        // Credentials must be in the URL userinfo so FFmpeg can answer the 401.
-                        int schemeEnd = fullUrl.IndexOf("://");
-                        if (schemeEnd >= 0)
-                        {
-                            string userInfo = Uri.EscapeDataString(StreamUsername) + ":"
-                                           + Uri.EscapeDataString(StreamPassword) + "@";
-                            fullUrl = fullUrl.Substring(0, schemeEnd + 3) + userInfo
-                                    + fullUrl.Substring(schemeEnd + 3);
-                        }
-                    }
-                    else
-                    {
-                        // RTMP/SRT/others: MediaMTX query-string format (?user=X&pass=Y)
-                        string sep = fullUrl.Contains("?") ? "&" : "?";
-                        fullUrl += sep
-                                 + "user=" + Uri.EscapeDataString(StreamUsername)
-                                 + "&pass=" + Uri.EscapeDataString(StreamPassword);
-                    }
-                }
-
-                return fullUrl;
+                if (!string.IsNullOrWhiteSpace(FfmpegPath) && File.Exists(FfmpegPath)) return FfmpegPath;
+                if (File.Exists(BundledFfmpegPath)) return BundledFfmpegPath;
+                if (File.Exists(BundledFfmpegFlat)) return BundledFfmpegFlat;
+                return BundledFfmpegPath; // default target (the settings dialog warns if missing)
             }
         }
 
-        /// <summary>Display-safe URL — password replaced with asterisks.</summary>
-        public string DisplayStreamUrl
+        // ── MediaServerConfig <-> settings ─────────────────────────────────────────
+
+        public MediaServerConfig ToServerConfig()
         {
-            get
+            var c = new MediaServerConfig
             {
-                if (string.IsNullOrEmpty(StreamPassword)) return FullStreamUrl;
-                return FullStreamUrl.Replace(
-                    Uri.EscapeDataString(StreamPassword), "***");
-            }
+                alias      = Alias,
+                host       = ServerHost ?? "",
+                streamPath = string.IsNullOrEmpty(StreamPath) ? "icu" : StreamPath,
+                username   = ServerUsername ?? "",
+                password   = ServerPassword ?? "",
+                serverPort = ServerPort > 0 ? ServerPort : 8554,
+            };
+            c.destination = ParseEnum(Destination, MediaServerConfig.Destination.SERVER);
+            c.pushProtocol = ParseEnum(PushProtocol, MediaServerConfig.PushProtocol.RTSP);
+            return c;
         }
 
-        /// <summary>Public stream URL without embedded credentials — safe to broadcast in CoT and OpenTAK registration.</summary>
-        public string PublicStreamUrl
+        public void ApplyServerConfig(MediaServerConfig c)
         {
-            get
-            {
-                string url = (StreamUrl ?? "").TrimEnd('/');
-                string key = StreamKey ?? "";
-                return string.IsNullOrEmpty(key) ? url : url + "/" + key;
-            }
+            Alias          = c.alias;
+            Destination    = c.destination.ToString();
+            PushProtocol   = c.pushProtocol.ToString();
+            ServerHost     = c.host ?? "";
+            ServerPort     = c.serverPort;
+            StreamPath     = c.streamPath ?? "icu";
+            ServerUsername = c.username ?? "";
+            ServerPassword = c.password ?? "";
         }
 
-        // ── Persistence ──────────────────────────────────────────────────────────
+        // ── EncoderConfig <-> settings ─────────────────────────────────────────────
+
+        public EncoderConfig ToEncoderConfig() => new EncoderConfig
+        {
+            resolution      = ParseEnum(Resolution, EncoderConfig.Resolution.P720),
+            bitrateKbps     = VideoBitrate > 0 ? VideoBitrate : 2000,
+            fps             = FrameRate > 0 ? FrameRate : 30,
+            rotationDegrees = RotationDegrees,
+        };
+
+        public void ApplyEncoderConfig(EncoderConfig c)
+        {
+            Resolution      = c.resolution.ToString();
+            VideoBitrate    = c.bitrateKbps;
+            FrameRate       = c.fps;
+            RotationDegrees = c.rotationDegrees;
+        }
+
+        private static T ParseEnum<T>(string s, T fallback) where T : struct
+        {
+            return !string.IsNullOrEmpty(s) && Enum.TryParse(s, true, out T v) ? v : fallback;
+        }
+
+        // ── Persistence ────────────────────────────────────────────────────────────
 
         public static AppSettings Load()
         {
@@ -148,22 +151,8 @@ namespace ICUVideoStreamer.Models
                     {
                         var s = (AppSettings)new DataContractJsonSerializer(typeof(AppSettings))
                                     .ReadObject(fs);
-                        if (string.IsNullOrEmpty(s.Uid))
-                            s.Uid = Guid.NewGuid().ToString();
-
-                        // DataContractJsonSerializer zeroes missing fields instead of
-                        // using declared initialiser values.  Patch fields that were
-                        // added after the initial release so old settings files still
-                        // get sensible defaults on first load after an upgrade.
-                        if (string.IsNullOrEmpty(s.SensorName)) s.SensorName = "WinTAK-ICU";
-                        if (s.SensorHFov   <= 0) s.SensorHFov   = 60.0;
-                        if (s.SensorVFov   <= 0) s.SensorVFov   = 34.0;
-                        if (s.FrameRate    <= 0) s.FrameRate     = 30;
-                        if (s.VideoBitrate <= 0) s.VideoBitrate  = 2000;
-                        if (s.AudioBitrate <= 0) s.AudioBitrate  = 128;
-
-                        // Decrypt credentials into runtime-only property
-                        s.StreamPassword = Unprotect(s.StreamPasswordProtected);
+                        s.Normalize();
+                        s.ServerPassword = Unprotect(s.ServerPasswordProtected);
                         return s;
                     }
                 }
@@ -175,12 +164,34 @@ namespace ICUVideoStreamer.Models
             return defaults;
         }
 
+        /// <summary>
+        /// DataContractJsonSerializer zeroes/nulls members missing from the file rather
+        /// than using field initializers, so patch anything that came back empty.
+        /// </summary>
+        private void Normalize()
+        {
+            if (string.IsNullOrEmpty(Uid))          Uid = Guid.NewGuid().ToString();
+            if (string.IsNullOrEmpty(Alias))        Alias = "VIDEO_1";
+            if (string.IsNullOrEmpty(Destination))  Destination = "SERVER";
+            if (string.IsNullOrEmpty(PushProtocol)) PushProtocol = "RTSP";
+            if (string.IsNullOrEmpty(StreamPath))   StreamPath = "icu";
+            if (string.IsNullOrEmpty(Resolution))   Resolution = "P720";
+            if (string.IsNullOrEmpty(VideoCodec))   VideoCodec = "H264";
+            if (string.IsNullOrEmpty(AudioCodec))   AudioCodec = "AAC";
+            if (string.IsNullOrEmpty(SensorName))   SensorName = "WinTAK-ICU";
+            if (ServerPort   <= 0) ServerPort = 8554;
+            if (VideoBitrate <= 0) VideoBitrate = 2000;
+            if (FrameRate    <= 0) FrameRate = 30;
+            if (AudioBitrate <= 0) AudioBitrate = 128;
+            if (SensorHFov   <= 0) SensorHFov = 60.0;
+            if (SensorVFov   <= 0) SensorVFov = 34.0;
+        }
+
         public void Save()
         {
             try
             {
-                // Encrypt credentials before persisting
-                StreamPasswordProtected = Protect(StreamPassword);
+                ServerPasswordProtected = Protect(ServerPassword);
 
                 string dir = Path.GetDirectoryName(SettingsPath);
                 Directory.CreateDirectory(dir);
@@ -192,7 +203,7 @@ namespace ICUVideoStreamer.Models
             catch { }
         }
 
-        // ── DPAPI helpers ─────────────────────────────────────────────────────────
+        // ── DPAPI helpers ───────────────────────────────────────────────────────────
 
         private static string Protect(string plaintext)
         {
@@ -200,9 +211,7 @@ namespace ICUVideoStreamer.Models
             try
             {
                 byte[] encrypted = ProtectedData.Protect(
-                    Encoding.UTF8.GetBytes(plaintext),
-                    null,
-                    DataProtectionScope.CurrentUser);
+                    Encoding.UTF8.GetBytes(plaintext), null, DataProtectionScope.CurrentUser);
                 return Convert.ToBase64String(encrypted);
             }
             catch { return ""; }
@@ -214,9 +223,7 @@ namespace ICUVideoStreamer.Models
             try
             {
                 byte[] decrypted = ProtectedData.Unprotect(
-                    Convert.FromBase64String(ciphertext),
-                    null,
-                    DataProtectionScope.CurrentUser);
+                    Convert.FromBase64String(ciphertext), null, DataProtectionScope.CurrentUser);
                 return Encoding.UTF8.GetString(decrypted);
             }
             catch { return ""; }
@@ -228,11 +235,10 @@ namespace ICUVideoStreamer.Models
         {
             try
             {
-                var di   = new System.IO.DirectoryInfo(path);
+                var di   = new DirectoryInfo(path);
                 var acl  = di.GetAccessControl();
                 var user = System.Security.Principal.WindowsIdentity.GetCurrent().User;
 
-                // Remove inherited rules and grant current user full control only
                 acl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
                 acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
                     user,
@@ -243,7 +249,7 @@ namespace ICUVideoStreamer.Models
                     System.Security.AccessControl.AccessControlType.Allow));
                 di.SetAccessControl(acl);
             }
-            catch { /* non-fatal — ACL hardening is best-effort */ }
+            catch { /* best-effort hardening */ }
         }
     }
 }

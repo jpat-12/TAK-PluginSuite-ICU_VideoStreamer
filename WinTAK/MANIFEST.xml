@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wintakPluginPackage>
+  <metadata>
+    <id>ICUVideoStreamer</id>
+    <version>1.0</version>
+    <sdkVersion>5.6.0.151</sdkVersion>
+    <takVariants>
+    </takVariants>
+    <description>ICU VideoStreamer: stream a desktop camera or screen into TAK with a UAS-style operator HUD, embedded MISB ST 0601 KLV metadata, an auto-updating sensor marker (FOV cone + video link), and snapshot-to-marker. Publishes to a media server (RTMP/RTSP/SRT) or the local network via UDP multicast.</description>
+    <dependencies>
+    </dependencies>
+  </metadata>
+</wintakPluginPackage>

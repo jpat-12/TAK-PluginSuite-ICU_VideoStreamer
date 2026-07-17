@@ -1,22 +1,31 @@
 using System;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.ComponentModel.Composition;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
-using System.Xml;
 using Prism.Commands;
 using WinTak.Common.Location;
 using WinTak.Common.Services;
 using WinTak.CursorOnTarget.Services;
 using WinTak.Framework.Docking;
 using WinTak.Framework.Docking.Attributes;
-using ICUVideoStreamer.Cot;
+using ICUVideoStreamer.Capture;
+using ICUVideoStreamer.Klv;
 using ICUVideoStreamer.Models;
-using ICUVideoStreamer.Services;
+using ICUVideoStreamer.Serve;
+using ICUVideoStreamer.Share;
 
 namespace ICUVideoStreamer
 {
+    /// <summary>
+    /// The operator pane. Mirrors the ATAK plugin's <c>ICUVideoDropDownReceiver</c>:
+    /// a docked UAS-style HUD (status row + destination badge + video + right-edge
+    /// Broadcast/Record/Snapshot quick-action column) with start/stop confirmations.
+    /// The WinTAK power features (camera picker, GPS, sensor FOV, manual location) live
+    /// in a collapsible control drawer so the default look matches the ATAK operator pane.
+    /// </summary>
     [DockPane(ID, "ICU VideoStreamer", Content = typeof(VideoStreamView))]
     [Export(typeof(IDockPane))]
     public class VideoStreamDockPane : DockPane
@@ -24,39 +33,78 @@ namespace ICUVideoStreamer
         internal const string ID = "ICUVideoStreamer_VideoStreamDockPane";
 
         // WinTAK-injected services
-        private readonly ILocationService   _locationService;
-        private readonly ICotMessageSender  _cotSender;
+        private readonly ILocationService  _locationService;
+        private readonly ICotMessageSender _cotSender;
 
         // Plugin-owned services
         private AppSettings          _settings;
+        private MediaServerConfig    _server;
+        private EncoderConfig        _encoder;
         private StreamingService     _streamingService;
         private CameraPreviewService _previewService;
         private KlvService           _klvService;
+        private StreamSensorMarker   _sensorMarker;
 
         // Timers
         private DispatcherTimer _clockTimer;
         private DispatcherTimer _streamTimer;
-        private DispatcherTimer _sensorCotTimer; // periodically re-sends video CoT with updated sensor data
         private DateTime        _streamStart;
 
-        // Location (updated from ILocationService or manual override)
-        private double _lat;
-        private double _lon;
-        private double _alt;
+        // Location
+        private double _lat, _lon, _alt;
+        private bool   _hasPosition;
+        private bool   _streamPathResolved; // stream path has been seeded from the callsign (or already custom)
 
-        // ── Observable properties ────────────────────────────────────────────────
+        [ImportingConstructor]
+        public VideoStreamDockPane(ILocationService locationService, ICotMessageSender cotSender)
+        {
+            _locationService = locationService;
+            _cotSender       = cotSender;
+
+            BroadcastCommand            = new DelegateCommand(OnToggleBroadcast);
+            RecordCommand               = new DelegateCommand(OnToggleRecord);
+            SnapshotCommand             = new DelegateCommand(OnSnapshot);
+            OpenSettingsCommand         = new DelegateCommand(OnOpenSettings);
+            RefreshDevicesCommand       = new DelegateCommand(OnRefreshDevices);
+            ToggleControlPanelCommand   = new DelegateCommand(() => ControlPanelVisible = !ControlPanelVisible);
+            ApplyLocationCommand        = new DelegateCommand(OnApplyLocation);
+            ToggleManualLocationCommand = new DelegateCommand(() =>
+                IsManualLocationExpanded = !IsManualLocationExpanded);
+
+            _settings = AppSettings.Load();
+            _sensorMarker = new StreamSensorMarker(_cotSender);
+
+            InitializeServices();
+            StartClockTimer();
+            OnRefreshDevices();
+            RefreshDestinationBadge();
+            RefreshStreamUrlDisplay();
+            TrySeedStreamPathFromCallsign();   // immediate attempt; clock timer retries until callsign is known
+
+            // Seed sensor sliders from persisted defaults
+            _sensorHeading   = 0;
+            _sensorElevation = 0;
+
+            // Subscribe to WinTAK GPS
+            _locationService.PositionChanged         += OnPositionChanged;
+            _locationService.ConnectionStatusChanged += OnGpsConnectionChanged;
+            SyncPositionFromService();
+            UpdateGpsStatus();
+        }
+
+        // ══ Observable properties ═══════════════════════════════════════════════════
+
+        private string _statusText = "Idle — not broadcasting";
+        public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
+
+        private string _destinationBadge = "LAN";
+        public string DestinationBadge { get => _destinationBadge; private set => SetProperty(ref _destinationBadge, value); }
 
         private string _clockText = "";
         public string ClockText { get => _clockText; private set => SetProperty(ref _clockText, value); }
 
-        private string _statusText = "Ready";
-        public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
-
         private string _bitrateText = "";
         public string BitrateText { get => _bitrateText; private set => SetProperty(ref _bitrateText, value); }
-
-        private Brush _streamDotColor = Brushes.Red;
-        public Brush StreamDotColor { get => _streamDotColor; private set => SetProperty(ref _streamDotColor, value); }
 
         private string _streamElapsedText = "";
         public string StreamElapsedText { get => _streamElapsedText; private set => SetProperty(ref _streamElapsedText, value); }
@@ -68,27 +116,55 @@ namespace ICUVideoStreamer
             private set
             {
                 if (SetProperty(ref _isStreaming, value))
-                    OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(CanChangeSource)));
+                {
+                    OnPropertyChanged(new PropertyChangedEventArgs(nameof(CanChangeSource)));
+                    OnPropertyChanged(new PropertyChangedEventArgs(nameof(BroadcastLabel)));
+                    OnPropertyChanged(new PropertyChangedEventArgs(nameof(LiveDotVisibility)));
+                }
             }
         }
 
+        public string BroadcastLabel => IsStreaming ? "Stop" : "Broadcast";
+        public Visibility LiveDotVisibility => IsStreaming ? Visibility.Visible : Visibility.Collapsed;
         public bool CanChangeSource => !IsStreaming;
 
-        private System.Windows.Media.ImageSource _frozenPreviewBitmap;
-        public System.Windows.Media.ImageSource PreviewBitmap => _previewService?.Bitmap ?? _frozenPreviewBitmap;
+        private bool _recordArmed;
+        public bool RecordArmed
+        {
+            get => _recordArmed;
+            private set
+            {
+                if (SetProperty(ref _recordArmed, value))
+                    OnPropertyChanged(new PropertyChangedEventArgs(nameof(RecBadgeVisibility)));
+            }
+        }
 
-        private Visibility _recBadgeVisibility = Visibility.Collapsed;
-        public Visibility RecBadgeVisibility { get => _recBadgeVisibility; private set => SetProperty(ref _recBadgeVisibility, value); }
+        public Visibility RecBadgeVisibility =>
+            (RecordArmed || (IsStreaming && _settings.EnableRecording))
+                ? Visibility.Visible : Visibility.Collapsed;
+
+        private ImageSource _frozenPreviewBitmap;
+        private bool _streamPreviewActive; // true once the streaming FFmpeg's teed preview is rendering
+
+        public ImageSource PreviewBitmap =>
+            (IsStreaming && _streamPreviewActive)
+                ? (ImageSource)_streamingService?.PreviewBitmap ?? _frozenPreviewBitmap
+                : (_previewService?.Bitmap ?? _frozenPreviewBitmap);
+
+        private double _previewRotation;
+        public double PreviewRotation { get => _previewRotation; private set => SetProperty(ref _previewRotation, value); }
 
         private string _streamUrlDisplay = "";
         public string StreamUrlDisplay { get => _streamUrlDisplay; private set => SetProperty(ref _streamUrlDisplay, value); }
 
         public string BuildDateText { get; } =
             "Built " + System.IO.File.GetLastWriteTime(
-                System.Reflection.Assembly.GetExecutingAssembly().Location)
-                .ToString("yyyy-MM-dd HH:mm");
+                System.Reflection.Assembly.GetExecutingAssembly().Location).ToString("yyyy-MM-dd HH:mm");
 
-        // GPS status (replaces TAK server status — WinTAK manages the connection)
+        private bool _controlPanelVisible;
+        public bool ControlPanelVisible { get => _controlPanelVisible; set => SetProperty(ref _controlPanelVisible, value); }
+
+        // GPS
         private Brush _gpsDotColor = Brushes.Red;
         public Brush GpsDotColor { get => _gpsDotColor; private set => SetProperty(ref _gpsDotColor, value); }
 
@@ -103,6 +179,11 @@ namespace ICUVideoStreamer
 
         private string _altText = "0.0";
         public string AltText { get => _altText; private set => SetProperty(ref _altText, value); }
+
+        public string PositionText => $"{LatText}, {LonText}";
+
+        // Camera
+        public ObservableCollection<string> CameraDevices { get; } = new ObservableCollection<string>();
 
         private string _selectedCamera = "";
         public string SelectedCamera
@@ -132,23 +213,7 @@ namespace ICUVideoStreamer
             }
         }
 
-        private string _manualLat = "";
-        public string ManualLat { get => _manualLat; set => SetProperty(ref _manualLat, value); }
-
-        private string _manualLon = "";
-        public string ManualLon { get => _manualLon; set => SetProperty(ref _manualLon, value); }
-
-        private string _manualAlt = "";
-        public string ManualAlt { get => _manualAlt; set => SetProperty(ref _manualAlt, value); }
-
-        private bool _isManualLocationExpanded;
-        public bool IsManualLocationExpanded
-        {
-            get => _isManualLocationExpanded;
-            set => SetProperty(ref _isManualLocationExpanded, value);
-        }
-
-        // Sensor heading (0–360°) — KLV tag 5 + CoT sensor azimuth, drives the UI arrow
+        // Sensor sliders (KLV tag 5 heading / tag 19 elevation + CoT sensor azimuth)
         private double _sensorHeading;
         public double SensorHeading
         {
@@ -158,12 +223,11 @@ namespace ICUVideoStreamer
                 if (SetProperty(ref _sensorHeading, value))
                 {
                     _klvService?.UpdateHeading(value);
-                    SendSensorCot(); // update map cone immediately
+                    _sensorMarker?.SetPose(_lat, _lon, _alt, _sensorHeading, _sensorElevation);
                 }
             }
         }
 
-        // Sensor elevation angle (−90 to +90°) — KLV tag 19 + CoT sensor elevation
         private double _sensorElevation;
         public double SensorElevation
         {
@@ -173,81 +237,264 @@ namespace ICUVideoStreamer
                 if (SetProperty(ref _sensorElevation, value))
                 {
                     _klvService?.UpdateElevation(value);
-                    SendSensorCot(); // update map cone immediately
+                    _sensorMarker?.SetPose(_lat, _lon, _alt, _sensorHeading, _sensorElevation);
                 }
             }
         }
 
-        public ObservableCollection<string> CameraDevices { get; } = new ObservableCollection<string>();
+        // Manual location
+        private string _manualLat = "";
+        public string ManualLat { get => _manualLat; set => SetProperty(ref _manualLat, value); }
+        private string _manualLon = "";
+        public string ManualLon { get => _manualLon; set => SetProperty(ref _manualLon, value); }
+        private string _manualAlt = "";
+        public string ManualAlt { get => _manualAlt; set => SetProperty(ref _manualAlt, value); }
 
-        // ── Commands ─────────────────────────────────────────────────────────────
+        private bool _isManualLocationExpanded;
+        public bool IsManualLocationExpanded { get => _isManualLocationExpanded; set => SetProperty(ref _isManualLocationExpanded, value); }
 
-        public DelegateCommand StartStreamCommand          { get; }
-        public DelegateCommand StopStreamCommand           { get; }
+        // ══ Commands ════════════════════════════════════════════════════════════════
+
+        public DelegateCommand BroadcastCommand            { get; }
+        public DelegateCommand RecordCommand               { get; }
+        public DelegateCommand SnapshotCommand             { get; }
         public DelegateCommand OpenSettingsCommand         { get; }
         public DelegateCommand RefreshDevicesCommand       { get; }
+        public DelegateCommand ToggleControlPanelCommand   { get; }
         public DelegateCommand ApplyLocationCommand        { get; }
         public DelegateCommand ToggleManualLocationCommand { get; }
 
-        // ── Constructor ──────────────────────────────────────────────────────────
+        // ══ Service setup ═══════════════════════════════════════════════════════════
 
-        [ImportingConstructor]
-        public VideoStreamDockPane(ILocationService locationService, ICotMessageSender cotSender)
+        private void InitializeServices()
         {
-            _locationService = locationService;
-            _cotSender       = cotSender;
+            _streamingService?.Dispose();
 
-            StartStreamCommand          = new DelegateCommand(OnStartStream, () => !IsStreaming);
-            StopStreamCommand           = new DelegateCommand(OnStopStream,  () => IsStreaming);
-            OpenSettingsCommand         = new DelegateCommand(OnOpenSettings);
-            RefreshDevicesCommand       = new DelegateCommand(OnRefreshDevices);
-            ApplyLocationCommand        = new DelegateCommand(OnApplyLocation);
-            ToggleManualLocationCommand = new DelegateCommand(() =>
-                IsManualLocationExpanded = !IsManualLocationExpanded);
+            _server  = _settings.ToServerConfig();
+            _encoder = _settings.ToEncoderConfig();
+            PreviewRotation = _encoder.rotationDegrees;
 
-            _settings = AppSettings.Load();
-            InitializeServices();
-            StartClockTimer();
-            OnRefreshDevices();
-            RefreshStreamUrlDisplay();
+            _streamingService = new StreamingService(_settings);
+            _streamingService.BitrateUpdated += kbps =>
+                Application.Current?.Dispatcher.InvokeAsync(() =>
+                    BitrateText = kbps > 0 ? kbps + " kbps" : "");
+            _streamingService.StatusChanged += s =>
+                Application.Current?.Dispatcher.InvokeAsync(() => StatusText = s);
+            _streamingService.Stopped += () =>
+                Application.Current?.Dispatcher.InvokeAsync(OnStreamStopped);
+            _streamingService.PreviewFrameReady += () =>
+                Application.Current?.Dispatcher.InvokeAsync(() =>
+                {
+                    _streamPreviewActive = true;
+                    OnPropertyChanged(new PropertyChangedEventArgs(nameof(PreviewBitmap)));
+                });
 
-            // Subscribe to WinTAK's GPS
-            _locationService.PositionChanged          += OnPositionChanged;
-            _locationService.ConnectionStatusChanged  += OnGpsConnectionChanged;
+            if (_klvService == null) _klvService = new KlvService();
+            _klvService.SensorName = _settings.SensorName;
+            _klvService.UpdateFov(_settings.SensorHFov, _settings.SensorVFov);
+            _klvService.UpdateHeading(_sensorHeading);
+            _klvService.UpdateElevation(_sensorElevation);
+            _klvService.UpdateLocation(_lat, _lon, _alt);
 
-            // Seed current position
-            SyncPositionFromService();
-            UpdateGpsStatus();
-
-            // Broadcast the sensor CoT immediately and every 10 s regardless of
-            // streaming state so other ATAK devices always see the sensor marker.
-            SendSensorCot();
-            StartSensorCotTimer();
+            var (uid, callsign) = GetSelfIdentity();
+            _sensorMarker.SetIdentity(uid + "-SENSOR", callsign, _settings.SensorName,
+                _settings.SensorHFov, _settings.SensorVFov);
         }
 
-        // ── WinTAK GPS integration ────────────────────────────────────────────────
+        private void StartClockTimer()
+        {
+            _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _clockTimer.Tick += (s, e) =>
+            {
+                ClockText = DateTime.Now.ToString("HH:mm:ss");
+                if (!_streamPathResolved) TrySeedStreamPathFromCallsign();
+            };
+            _clockTimer.Start();
+        }
+
+        // ══ Preview ═════════════════════════════════════════════════════════════════
+
+        private void UpdatePreview()
+        {
+            bool shouldPreview = !string.IsNullOrEmpty(SelectedCamera) && !IsScreenShare && !IsStreaming;
+
+            _previewService?.Stop();
+            if (shouldPreview)
+            {
+                _previewService = new CameraPreviewService();
+                _previewService.StatusChanged += s =>
+                    Application.Current?.Dispatcher.InvokeAsync(() => StatusText = s);
+                _previewService.Start(SelectedCamera, _settings.ResolvedFfmpegPath, Application.Current.Dispatcher);
+            }
+            else
+            {
+                _previewService = null;
+            }
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(PreviewBitmap)));
+        }
+
+        // ══ Broadcast ═══════════════════════════════════════════════════════════════
+
+        private void OnToggleBroadcast()
+        {
+            if (IsStreaming)
+            {
+                if (Confirm("Stop Broadcast?",
+                        "This stops the camera and drops the feed for anyone watching.",
+                        "Stop"))
+                    StopBroadcast();
+                return;
+            }
+
+            string dest = _server.PushEnabled
+                ? _server.ProtocolName + " → " + _server.ViewUrl()
+                : "Local network (UDP multicast " +
+                  MediaServerConfig.LanMulticastHost + ":" + MediaServerConfig.LanMulticastPort + ")";
+
+            if (Confirm("Start Broadcast?", "Destination:\n" + dest, "Start"))
+                StartBroadcast();
+        }
+
+        private void StartBroadcast()
+        {
+            if (string.IsNullOrEmpty(SelectedCamera) && !IsScreenShare)
+            {
+                StatusText = "Select a camera or enable Screen Share first.";
+                return;
+            }
+
+            _frozenPreviewBitmap = _previewService?.Bitmap; // keep last frame while streaming
+            _previewService?.Stop();
+            _previewService = null;
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(PreviewBitmap)));
+
+            // KLV pipe must be listening before FFmpeg connects.
+            _klvService?.UpdateLocation(_lat, _lon, _alt);
+            _klvService?.UpdateHeading(_sensorHeading);
+            _klvService?.UpdateElevation(_sensorElevation);
+            if (_server.KlvCapable) _klvService?.Start();
+
+            // Give DirectShow time to release the camera before FFmpeg opens it.
+            System.Threading.Tasks.Task.Delay(600).ContinueWith(_ =>
+                Application.Current?.Dispatcher.InvokeAsync(StartBroadcastCore));
+        }
+
+        private void StartBroadcastCore()
+        {
+            string klvPipe = _server.KlvCapable ? _klvService?.PipeName : null;
+            _streamPreviewActive = false; // show frozen frame until the teed preview delivers
+            _streamingService.Start(_server, _encoder, klvPipe, Application.Current?.Dispatcher);
+            if (!_streamingService.IsStreaming)
+            {
+                _klvService?.Stop();
+                return;
+            }
+
+            IsStreaming       = true;
+            StatusText        = "LIVE · " + EncoderConfig.Label(_encoder.resolution);
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(RecBadgeVisibility)));
+            RefreshStreamUrlDisplay();
+            StartStreamTimer();
+
+            // Sensor marker carries the reachable view URL.
+            _sensorMarker.SetPose(_lat, _lon, _alt, _sensorHeading, _sensorElevation);
+            _sensorMarker.SetStreamUrl(_server.ViewUrl());
+            _sensorMarker.Start();
+        }
+
+        private void StopBroadcast()
+        {
+            _streamingService.Stop();
+            OnStreamStopped();
+        }
+
+        private void OnStreamStopped()
+        {
+            // Idempotent: StopBroadcast() calls this directly and the FFmpeg Stopped event
+            // also fires it. After the first pass IsStreaming is false and the timer is gone.
+            if (!IsStreaming && _streamTimer == null) return;
+
+            _sensorMarker.Stop();
+            _klvService?.Stop();
+
+            _streamPreviewActive = false;
+            IsStreaming        = false;
+            BitrateText        = "";
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(PreviewBitmap)));
+            StopStreamTimer();
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(RecBadgeVisibility)));
+            RefreshStreamUrlDisplay();
+            StatusText = "Idle — not broadcasting";
+
+            // Let FFmpeg fully release the camera before restarting the preview.
+            System.Threading.Tasks.Task.Delay(1000).ContinueWith(_ =>
+                Application.Current?.Dispatcher.InvokeAsync(() =>
+                {
+                    _frozenPreviewBitmap = null;
+                    UpdatePreview();
+                }));
+        }
+
+        // ══ Record / Snapshot ═══════════════════════════════════════════════════════
+
+        private void OnToggleRecord()
+        {
+            _settings.EnableRecording = !_settings.EnableRecording;
+            RecordArmed = _settings.EnableRecording;
+            _settings.Save();
+
+            if (_settings.EnableRecording && string.IsNullOrEmpty(_settings.RecordingPath))
+            {
+                _settings.RecordingPath = SnapshotMarker.SnapshotDir; // reuse a sane default dir
+                _settings.Save();
+            }
+
+            if (IsStreaming)
+                StatusText = "Recording " + (_settings.EnableRecording ? "armed" : "disarmed") +
+                             " — applies on next broadcast.";
+            else
+                StatusText = "Recording " + (_settings.EnableRecording ? "armed" : "disarmed") + ".";
+        }
+
+        private void OnSnapshot()
+        {
+            var frame = PreviewBitmap as System.Windows.Media.Imaging.BitmapSource;
+            var (uid, callsign) = GetSelfIdentity();
+            var result = SnapshotMarker.Capture(
+                frame, callsign, _settings.Alias, _lat, _lon, _hasPosition, _cotSender);
+
+            if (!result.Saved)
+                StatusText = "Snapshot failed: " + (result.Error ?? "no frame");
+            else
+                StatusText = result.MarkerDropped
+                    ? "Snapshot saved + marker dropped"
+                    : "Snapshot saved: " + System.IO.Path.GetFileName(result.FilePath);
+        }
+
+        // ══ WinTAK GPS ══════════════════════════════════════════════════════════════
 
         private void OnPositionChanged(object sender, PositionChangedEventArgs e)
         {
             _lat = e.Position.Latitude;
             _lon = e.Position.Longitude;
             _alt = e.Position.Altitude;
+            _hasPosition = true;
             _klvService?.UpdateLocation(_lat, _lon, _alt);
+            _sensorMarker?.SetPose(_lat, _lon, _alt, _sensorHeading, _sensorElevation);
 
             Application.Current?.Dispatcher.InvokeAsync(() =>
             {
                 LatText = _lat.ToString("F7");
                 LonText = _lon.ToString("F7");
                 AltText = _alt.ToString("F1");
-                GpsDotColor  = Brushes.LimeGreen;
+                OnPropertyChanged(new PropertyChangedEventArgs(nameof(PositionText)));
+                GpsDotColor   = Brushes.LimeGreen;
                 GpsStatusText = "GPS Active";
             });
         }
 
-        private void OnGpsConnectionChanged(object sender, EventArgs e)
-        {
+        private void OnGpsConnectionChanged(object sender, EventArgs e) =>
             Application.Current?.Dispatcher.InvokeAsync(UpdateGpsStatus);
-        }
 
         private void SyncPositionFromService()
         {
@@ -256,12 +503,12 @@ namespace ICUVideoStreamer
                 var pos = _locationService.GetGpsPosition();
                 if (pos != null)
                 {
-                    _lat = pos.Latitude;
-                    _lon = pos.Longitude;
-                    _alt = pos.Altitude;
+                    _lat = pos.Latitude; _lon = pos.Longitude; _alt = pos.Altitude;
+                    _hasPosition = true;
                     LatText = _lat.ToString("F7");
                     LonText = _lon.ToString("F7");
                     AltText = _alt.ToString("F1");
+                    OnPropertyChanged(new PropertyChangedEventArgs(nameof(PositionText)));
                 }
             }
             catch { }
@@ -274,185 +521,87 @@ namespace ICUVideoStreamer
             GpsStatusText = hasGps ? "GPS Active" : "No GPS";
         }
 
-        // ── Service setup ────────────────────────────────────────────────────────
-
-        private void InitializeServices()
-        {
-            _streamingService?.Dispose();
-
-            _streamingService = new StreamingService(_settings);
-            _streamingService.BitrateUpdated += kbps =>
-                Application.Current?.Dispatcher.InvokeAsync(() =>
-                    BitrateText = kbps > 0 ? kbps + " kbps" : "");
-            _streamingService.StatusChanged += s =>
-                Application.Current?.Dispatcher.InvokeAsync(() => StatusText = s);
-            _streamingService.Stopped += () =>
-                Application.Current?.Dispatcher.InvokeAsync(OnStreamStopped);
-
-            // KlvService is independent of transport settings — create once
-            if (_klvService == null)
-                _klvService = new KlvService();
-
-            // Always sync sensor metadata from settings (user may have changed them)
-            _klvService.SensorName = _settings.SensorName;
-            _klvService.UpdateFov(_settings.SensorHFov, _settings.SensorVFov);
-            _klvService.UpdateHeading(_sensorHeading);
-            _klvService.UpdateElevation(_sensorElevation);
-            _klvService.UpdateLocation(_lat, _lon, _alt);
-
-            RefreshStreamUrlDisplay();
-        }
-
-        private void StartClockTimer()
-        {
-            _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _clockTimer.Tick += (s, e) => ClockText = DateTime.Now.ToString("HH:mm:ss");
-            _clockTimer.Start();
-        }
-
-        // ── Stream control ───────────────────────────────────────────────────────
-
-        private void UpdatePreview()
-        {
-            bool shouldPreview = !string.IsNullOrEmpty(SelectedCamera)
-                                 && !IsScreenShare
-                                 && !IsStreaming;
-
-            if (shouldPreview)
-            {
-                _previewService?.Stop();
-                _previewService = new CameraPreviewService();
-                _previewService.StatusChanged += s =>
-                    Application.Current?.Dispatcher.InvokeAsync(() => StatusText = s);
-                _previewService.Start(SelectedCamera, _settings.ResolvedFfmpegPath,
-                    Application.Current.Dispatcher);
-                OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(PreviewBitmap)));
-            }
-            else
-            {
-                _previewService?.Stop();
-                _previewService = null;
-                OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(PreviewBitmap)));
-            }
-        }
-
-        private void OnStartStream()
-        {
-            _frozenPreviewBitmap = _previewService?.Bitmap; // keep last frame visible while streaming
-            _previewService?.Stop();
-            _previewService = null;
-            OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(PreviewBitmap)));
-
-            // Start KLV pipe server — must be listening before FFmpeg connects to it
-            _klvService?.UpdateLocation(_lat, _lon, _alt);
-            _klvService?.UpdateHeading(_sensorHeading);
-            _klvService?.UpdateElevation(_sensorElevation);
-            _klvService?.Start();
-
-            // Give DirectShow time to fully release the camera before FFmpeg opens it
-            System.Threading.Tasks.Task.Delay(600).ContinueWith(_ =>
-                Application.Current?.Dispatcher.InvokeAsync(StartStreamCore));
-        }
-
-        private void StartStreamCore()
-        {
-            _streamingService.Start(_klvService?.PipeName);
-            if (!_streamingService.IsStreaming) return;
-
-            IsStreaming         = true;
-            StreamDotColor      = Brushes.LimeGreen;
-            StatusText          = "Streaming";
-            RecBadgeVisibility  = _settings.EnableRecording ? Visibility.Visible : Visibility.Collapsed;
-            RefreshStreamUrlDisplay();
-            StartStreamTimer();
-
-            // Fire an immediate update so the video URL appears in the sensor CoT
-            // as soon as the stream starts (timer is already running from constructor).
-            SendSensorCot();
-
-            StartStreamCommand.RaiseCanExecuteChanged();
-            StopStreamCommand.RaiseCanExecuteChanged();
-        }
-
-        // ── Sensor CoT (map FOV cone) ────────────────────────────────────────────
-
-        /// <summary>
-        /// Sends a b-m-p-s-p-loc sensor CoT with FOV cone and embedded video link.
-        /// Uses uid + "-SENSOR" so other ATAK devices see it as a NEW, separate
-        /// entity on the map rather than merging it into WinTAK's own SA marker.
-        /// </summary>
-        private void SendSensorCot()
-        {
-            var (uid, callsign) = GetSelfIdentity();
-            // Append "-SENSOR" so this is a distinct map entity from the WinTAK
-            // device dot.  ICU does the same by being a physically separate device
-            // with its own UID; we replicate that by creating a dedicated sensor UID.
-            SendCot(CotBuilder.BuildVideoEvent(
-                uid + "-SENSOR", callsign, _settings.PublicStreamUrl, _lat, _lon,
-                sensorAzimuth:   _sensorHeading,
-                sensorElevation: _sensorElevation,
-                hfov:            _settings.SensorHFov,
-                vfov:            _settings.SensorVFov,
-                sensorModel:     _settings.SensorName));
-        }
-
-        private void StartSensorCotTimer()
-        {
-            _sensorCotTimer?.Stop();
-            _sensorCotTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
-            _sensorCotTimer.Tick += (s, e) => SendSensorCot();
-            _sensorCotTimer.Start();
-        }
-
-        private void StopSensorCotTimer()
-        {
-            _sensorCotTimer?.Stop();
-            _sensorCotTimer = null;
-        }
-
-        private void OnStopStream()
-        {
-            _streamingService.Stop();
-            OnStreamStopped();
-        }
-
-        private void OnStreamStopped()
-        {
-            _klvService?.Stop();
-
-            IsStreaming        = false;
-            StreamDotColor     = Brushes.Red;
-            BitrateText        = "";
-            RecBadgeVisibility = Visibility.Collapsed;
-            StopStreamTimer();
-            StartStreamCommand.RaiseCanExecuteChanged();
-            StopStreamCommand.RaiseCanExecuteChanged();
-
-            RefreshStreamUrlDisplay();
-
-            // Delay preview restart so the streaming FFmpeg fully releases the camera
-            System.Threading.Tasks.Task.Delay(1000).ContinueWith(_ =>
-                Application.Current?.Dispatcher.InvokeAsync(() =>
-                {
-                    _frozenPreviewBitmap = null;
-                    UpdatePreview();
-                }));
-        }
-
-        // ── CoT sending via WinTAK ───────────────────────────────────────────────
-
-        private void SendCot(string cotXml)
+        private (string uid, string callsign) GetSelfIdentity()
         {
             try
             {
-                var doc = new XmlDocument();
-                doc.LoadXml(cotXml);
-                _cotSender.Send(doc);
+                var doc = _locationService.GetPositionDocument();
+                if (doc?.DocumentElement != null)
+                {
+                    string uid = doc.DocumentElement.GetAttribute("uid");
+                    var contact = doc.SelectSingleNode("//contact") as System.Xml.XmlElement;
+                    string callsign = contact?.GetAttribute("callsign") ?? "";
+                    if (!string.IsNullOrEmpty(uid)) return (uid, callsign);
+                }
             }
             catch { }
+            return (_settings.Uid, "WinTAK-ICU");
         }
 
-        // ── Timers ───────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Read just the operator callsign from WinTAK's self position document (available
+        /// once the self identity is initialized), or null if not ready yet.
+        /// </summary>
+        private string GetSelfCallsign()
+        {
+            try
+            {
+                var doc = _locationService.GetPositionDocument();
+                var contact = doc?.SelectSingleNode("//contact") as System.Xml.XmlElement;
+                string cs = contact?.GetAttribute("callsign");
+                if (!string.IsNullOrWhiteSpace(cs)) return cs.Trim();
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// Seed the stream path/name from the operator's WinTAK callsign so two operators
+        /// pushing to the same media server don't collide on a shared "icu" path. The
+        /// callsign isn't available when the pane is first constructed, so this is retried
+        /// from the clock timer until it succeeds. Only applied while the path is still the
+        /// untouched default; a user override in Settings sticks.
+        /// </summary>
+        private void TrySeedStreamPathFromCallsign()
+        {
+            if (_streamPathResolved) return;
+
+            // Already customized (anything other than the "icu" default) — leave it alone.
+            if (!string.IsNullOrWhiteSpace(_settings.StreamPath) && _settings.StreamPath != "icu")
+            {
+                _streamPathResolved = true;
+                return;
+            }
+
+            string callsign = GetSelfCallsign();
+            if (string.IsNullOrWhiteSpace(callsign) || callsign == "WinTAK-ICU")
+                return; // not ready yet — the clock timer will retry
+
+            string sanitized = SanitizeStreamPath(callsign);
+            _settings.StreamPath = sanitized;
+            _settings.Save();
+            if (_server != null) _server.streamPath = sanitized; // apply to the live config too
+            _streamPathResolved = true;
+            RefreshStreamUrlDisplay();
+        }
+
+        /// <summary>Reduce a callsign to a URL/streamid-safe path segment.</summary>
+        private static string SanitizeStreamPath(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "icu";
+            var sb = new System.Text.StringBuilder();
+            foreach (char c in s.Trim())
+            {
+                if (char.IsLetterOrDigit(c)) sb.Append(c);
+                else if (c == '-' || c == '_') sb.Append(c);
+                else if (c == ' ') sb.Append('_');
+                // everything else dropped
+            }
+            string r = sb.ToString().Trim('_');
+            return r.Length == 0 ? "icu" : r;
+        }
+
+        // ══ Timers ══════════════════════════════════════════════════════════════════
 
         private void StartStreamTimer()
         {
@@ -470,37 +619,28 @@ namespace ICUVideoStreamer
             StreamElapsedText = "";
         }
 
-        // ── WinTAK identity ──────────────────────────────────────────────────────
-
-        private (string uid, string callsign) GetSelfIdentity()
-        {
-            try
-            {
-                var doc = _locationService.GetPositionDocument();
-                if (doc?.DocumentElement != null)
-                {
-                    string uid = doc.DocumentElement.GetAttribute("uid");
-                    var contact = doc.SelectSingleNode("//contact") as System.Xml.XmlElement;
-                    string callsign = contact?.GetAttribute("callsign") ?? "";
-                    if (!string.IsNullOrEmpty(uid))
-                        return (uid, callsign);
-                }
-            }
-            catch { }
-            return (_settings.Uid, "WinTAK-ICU");
-        }
-
-        // ── Settings ─────────────────────────────────────────────────────────────
+        // ══ Settings / devices / location ═══════════════════════════════════════════
 
         private void OnOpenSettings()
         {
-            var win = new SettingsWindow(_settings);
-            win.Owner = Application.Current?.MainWindow;
+            var win = new SettingsWindow(_settings) { Owner = Application.Current?.MainWindow };
             if (win.ShowDialog() == true)
             {
                 _settings.Save();
+                RecordArmed = _settings.EnableRecording;
                 InitializeServices();
+                RefreshDestinationBadge();
                 RefreshStreamUrlDisplay();
+                if (IsStreaming)
+                {
+                    StatusText = "Restarting with new settings…";
+                    StopBroadcast();
+                    // preview/stream restart is deferred; user can re-tap Broadcast
+                }
+                else
+                {
+                    UpdatePreview();
+                }
             }
         }
 
@@ -510,10 +650,13 @@ namespace ICUVideoStreamer
             Application.Current?.Dispatcher.InvokeAsync(() =>
             {
                 CameraDevices.Clear();
-                foreach (string d in devices)
-                    CameraDevices.Add(d);
-                if (CameraDevices.Count > 0 && string.IsNullOrEmpty(SelectedCamera))
-                    SelectedCamera = CameraDevices[0]; // setter calls UpdatePreview
+                foreach (string d in devices) CameraDevices.Add(d);
+
+                // Restore the saved device if present, else pick the first.
+                if (!string.IsNullOrEmpty(_settings.VideoDevice) && CameraDevices.Contains(_settings.VideoDevice))
+                    SelectedCamera = _settings.VideoDevice;
+                else if (CameraDevices.Count > 0 && string.IsNullOrEmpty(SelectedCamera))
+                    SelectedCamera = CameraDevices[0];
                 else
                     UpdatePreview();
             });
@@ -524,16 +667,35 @@ namespace ICUVideoStreamer
             if (double.TryParse(ManualLat, out double lat)) _lat = lat;
             if (double.TryParse(ManualLon, out double lon)) _lon = lon;
             if (double.TryParse(ManualAlt, out double alt)) _alt = alt;
-            LatText    = _lat.ToString("F7");
-            LonText    = _lon.ToString("F7");
-            AltText    = _alt.ToString("F1");
+            _hasPosition = true;
+            LatText = _lat.ToString("F7");
+            LonText = _lon.ToString("F7");
+            AltText = _alt.ToString("F1");
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(PositionText)));
             _klvService?.UpdateLocation(_lat, _lon, _alt);
+            _sensorMarker?.SetPose(_lat, _lon, _alt, _sensorHeading, _sensorElevation);
             StatusText = "Location overridden manually";
+        }
+
+        private void RefreshDestinationBadge()
+        {
+            DestinationBadge = _server.PushEnabled
+                ? "SERVER → " + _server.host
+                : "LAN";
         }
 
         private void RefreshStreamUrlDisplay()
         {
-            StreamUrlDisplay = _settings?.DisplayStreamUrl ?? "";
+            StreamUrlDisplay = IsStreaming ? _server.ProtocolName + "  " + _server.ViewUrl() : "";
+        }
+
+        // ══ Helpers ═════════════════════════════════════════════════════════════════
+
+        private static bool Confirm(string title, string message, string positive)
+        {
+            var r = MessageBox.Show(Application.Current?.MainWindow,
+                message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question);
+            return r == MessageBoxResult.OK;
         }
     }
 }

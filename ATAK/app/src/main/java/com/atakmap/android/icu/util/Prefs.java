@@ -17,13 +17,26 @@ public final class Prefs {
     private Prefs() {}
 
     public static void load(Context ctx, MediaServerConfig srv, EncoderConfig enc) {
+        load(ctx, srv, enc, null);
+    }
+
+    /**
+     * @param defaultStreamPath used as the stream path / name the first time the plugin
+     *        runs (before the user has ever set one) — pass the device callsign so each
+     *        operator's stream lands on a distinct path and streams don't collide.
+     */
+    public static void load(Context ctx, MediaServerConfig srv, EncoderConfig enc,
+                            String defaultStreamPath) {
         SharedPreferences sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE);
 
         srv.destination = "LAN".equals(sp.getString("destination", "SERVER"))
                 ? MediaServerConfig.Destination.LAN : MediaServerConfig.Destination.SERVER;
         srv.alias      = sp.getString("alias", "VIDEO_1");
         srv.host       = sp.getString("server_host", "");
-        srv.streamPath = sp.getString("stream_path", "icu");
+        // First run: seed the path from the callsign; afterwards honor the saved value.
+        String seedPath = sanitizePathSegment(defaultStreamPath, "icu");
+        srv.streamPath = sp.contains("stream_path")
+                ? sp.getString("stream_path", seedPath) : seedPath;
         srv.username   = sp.getString("username", "");
         srv.password   = sp.getString("password", "");
         srv.serverPort = sp.getInt("server_port", 8554);
@@ -60,5 +73,16 @@ public final class Prefs {
 
     private static String nz(String v, String def) {
         return (v == null || v.trim().isEmpty()) ? def : v.trim();
+    }
+
+    /**
+     * Make a callsign safe to use as a URL/stream path segment: trim, collapse spaces to
+     * underscores, and drop anything outside [A-Za-z0-9._-]. Falls back to {@code def}
+     * when the result would be empty.
+     */
+    static String sanitizePathSegment(String v, String def) {
+        if (v == null) return def;
+        String s = v.trim().replaceAll("\\s+", "_").replaceAll("[^A-Za-z0-9._-]", "");
+        return s.isEmpty() ? def : s;
     }
 }

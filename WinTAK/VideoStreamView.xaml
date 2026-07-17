@@ -4,12 +4,83 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="600" d:DesignWidth="800"
-             Background="#FF1E1E1E" Foreground="White">
+             d:DesignHeight="520" d:DesignWidth="820"
+             Background="#FF000000" Foreground="White">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
 
+        <!-- ICU HUD palette (mirrors ATAK colors.xml) -->
+        <SolidColorBrush x:Key="IcuAccent"   Color="#29B6F6"/>
+        <SolidColorBrush x:Key="IcuDanger"   Color="#F44336"/>
+        <SolidColorBrush x:Key="IcuTextDim"  Color="#B0BEC5"/>
+        <SolidColorBrush x:Key="IcuHud"      Color="#B3000000"/>
+        <SolidColorBrush x:Key="IcuButton"   Color="#33FFFFFF"/>
+
+        <Style x:Key="LabelStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource IcuTextDim}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ValueStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Round translucent quick-action button (ATAK bg_hud_button) -->
+        <Style x:Key="QuickButton" TargetType="Button">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="Margin" Value="0,0,0,3"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" CornerRadius="10" Background="{StaticResource IcuButton}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#59FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="QuickLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource IcuTextDim}"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,1,0,10"/>
+        </Style>
+
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#33FFFFFF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Dark ComboBox (camera selector) -->
         <Style TargetType="{x:Type ComboBoxItem}">
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -25,17 +96,13 @@
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="Border" Property="Background" Value="#FF3D5F8F"/>
                             </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Border" Property="Background" Value="#FF2D4F7F"/>
-                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-
         <Style TargetType="{x:Type ComboBox}">
-            <Setter Property="Background" Value="#FF3A3A3A"/>
+            <Setter Property="Background" Value="#FF2A2A2A"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="BorderBrush" Value="#FF555555"/>
             <Setter Property="BorderThickness" Value="1"/>
@@ -75,11 +142,10 @@
                             </ContentPresenter>
                             <Popup x:Name="Popup" Placement="Bottom"
                                    IsOpen="{TemplateBinding IsDropDownOpen}"
-                                   AllowsTransparency="True" Focusable="False"
-                                   PopupAnimation="Slide">
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
                                 <Grid MinWidth="{TemplateBinding ActualWidth}"
                                       MaxHeight="{TemplateBinding MaxDropDownHeight}">
-                                    <Border Background="#FF3A3A3A" BorderBrush="#FF555555" BorderThickness="1"/>
+                                    <Border Background="#FF2A2A2A" BorderBrush="#FF555555" BorderThickness="1"/>
                                     <ScrollViewer Margin="0,2">
                                         <StackPanel IsItemsHost="True"
                                                     KeyboardNavigation.DirectionalNavigation="Contained"/>
@@ -91,28 +157,12 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style x:Key="LabelStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#FFAAAAAA"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-        </Style>
-        <Style x:Key="ValueStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-        </Style>
-        <Style x:Key="ActionButton" TargetType="Button">
-            <Setter Property="Background" Value="#FF3A3A3A"/>
+        <Style x:Key="DrawerButton" TargetType="Button">
+            <Setter Property="Background" Value="#FF2A2A2A"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="BorderBrush" Value="#FF555555"/>
             <Setter Property="Padding" Value="6,4"/>
-            <Setter Property="Margin" Value="2"/>
-        </Style>
-        <Style x:Key="GreenButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
-            <Setter Property="Background" Value="#FF2D6A2D"/>
-        </Style>
-        <Style x:Key="RedButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
-            <Setter Property="Background" Value="#FF6A2D2D"/>
+            <Setter Property="Margin" Value="0,2"/>
         </Style>
     </UserControl.Resources>
 
@@ -123,68 +173,77 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header Row -->
-        <Border Grid.Row="0" Background="#FF2B2B2B" Padding="8,4">
-            <DockPanel>
-                <Button DockPanel.Dock="Right" Style="{StaticResource ActionButton}"
-                        Command="{Binding OpenSettingsCommand}" Content="Settings" Width="70"/>
-                <Image DockPanel.Dock="Left" Width="40" Height="40" Margin="0,0,8,0"
-                       VerticalAlignment="Center"
-                       Source="pack://application:,,,/ICUVideoStreamer;component/assets/Large.png"/>
-                <TextBlock DockPanel.Dock="Left" Text="Video Stream"
-                           FontSize="14" FontWeight="Bold" Foreground="White"
-                           VerticalAlignment="Center" Margin="0,0,12,0"/>
-                <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Margin="0,0,6,0"
-                         Fill="{Binding StreamDotColor}" VerticalAlignment="Center"/>
-                <TextBlock DockPanel.Dock="Left" Text="{Binding BitrateText}"
-                           Style="{StaticResource ValueStyle}" Margin="0,0,6,0"/>
-                <Border DockPanel.Dock="Left" Background="#FF8B0000" Padding="4,2"
-                        CornerRadius="3" Margin="4,0"
-                        Visibility="{Binding RecBadgeVisibility}" VerticalAlignment="Center">
-                    <TextBlock Text="REC" Foreground="White" FontSize="10" FontWeight="Bold"/>
+        <!-- ═══ Top status HUD ═══ -->
+        <Border Grid.Row="0" Background="{StaticResource IcuHud}" Padding="10,4">
+            <DockPanel LastChildFill="False">
+                <Ellipse DockPanel.Dock="Left" Width="12" Height="12" Fill="{StaticResource IcuDanger}"
+                         VerticalAlignment="Center" Margin="0,0,8,0"
+                         Visibility="{Binding LiveDotVisibility}"/>
+                <TextBlock DockPanel.Dock="Left" Text="{Binding StatusText}"
+                           Style="{StaticResource ValueStyle}" TextTrimming="CharacterEllipsis"/>
+
+                <!-- Right cluster -->
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="34" Height="34"
+                        Command="{Binding OpenSettingsCommand}" ToolTip="Settings">
+                    <Path Fill="White" Stretch="Uniform" Width="18" Height="18"
+                          Data="M19.14,12.94a7.49,7.49,0,0,0,.05-.94,7.49,7.49,0,0,0-.05-.94l2-1.58a.5.5,0,0,0,.12-.61l-1.92-3.32a.5.5,0,0,0-.59-.22l-2.39.96a7,7,0,0,0-1.62-.94l-.36-2.54A.5.5,0,0,0,13.4,2H9.6a.5.5,0,0,0-.5.42L8.74,4.96a7,7,0,0,0-1.62.94L4.73,4.94a.5.5,0,0,0-.59.22L2.22,8.48a.5.5,0,0,0,.12.61l2,1.58a7.49,7.49,0,0,0,0,1.88l-2,1.58a.5.5,0,0,0-.12.61l1.92,3.32a.5.5,0,0,0,.59.22l2.39-.96a7,7,0,0,0,1.62.94l.36,2.54a.5.5,0,0,0,.5.42h3.8a.5.5,0,0,0,.5-.42l.36-2.54a7,7,0,0,0,1.62-.94l2.39.96a.5.5,0,0,0,.59-.22l1.92-3.32a.5.5,0,0,0-.12-.61ZM12,15.5A3.5,3.5,0,1,1,15.5,12,3.5,3.5,0,0,1,12,15.5Z"/>
+                </Button>
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="34" Height="34"
+                        Command="{Binding ToggleControlPanelCommand}" ToolTip="Controls">
+                    <Path Fill="White" Stretch="Uniform" Width="16" Height="16"
+                          Data="M3,5h14 M3,10h14 M3,15h14" Stroke="White" StrokeThickness="2"/>
+                </Button>
+                <Border DockPanel.Dock="Right" Background="#33FFFFFF" CornerRadius="3" Padding="6,2"
+                        Margin="6,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding DestinationBadge}" Foreground="{StaticResource IcuAccent}"
+                               FontSize="12" FontWeight="SemiBold"/>
                 </Border>
-                <TextBlock Text="{Binding StreamElapsedText}" Style="{StaticResource ValueStyle}"
-                           Margin="0,0,0,0" DockPanel.Dock="Left"/>
-                <TextBlock/>
+                <TextBlock DockPanel.Dock="Right" Text="{Binding StreamElapsedText}"
+                           Style="{StaticResource ValueStyle}" Margin="6,0"/>
+                <TextBlock DockPanel.Dock="Right" Text="{Binding BitrateText}"
+                           Style="{StaticResource ValueStyle}" Margin="6,0"/>
             </DockPanel>
         </Border>
 
-        <!-- Content Row -->
+        <!-- ═══ Body: video (fill) + control drawer + right quick column ═══ -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="180"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Camera preview area -->
-            <Border Grid.Column="0" Background="#FF111111" Margin="4">
+            <!-- Video -->
+            <Border Grid.Column="0" Background="#FF0A0A0A">
                 <Grid>
-                    <!-- Live camera feed -->
                     <Image Source="{Binding PreviewBitmap}" Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="LowQuality"/>
+                           RenderOptions.BitmapScalingMode="LowQuality">
+                        <Image.LayoutTransform>
+                            <RotateTransform Angle="{Binding PreviewRotation}"/>
+                        </Image.LayoutTransform>
+                    </Image>
 
-                    <!-- Placeholder when no feed is active -->
+                    <!-- Placeholder -->
                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="#FF555555" FontSize="14">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="Collapsed"/>
-                                <Setter Property="Text" Value="No Camera"/>
+                                <Setter Property="Text" Value="Camera preview"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding PreviewBitmap}" Value="{x:Null}">
                                         <Setter Property="Visibility" Value="Visible"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsScreenShare}" Value="True">
                                         <Setter Property="Visibility" Value="Visible"/>
-                                        <Setter Property="Text" Value="Screen Share Active"/>
+                                        <Setter Property="Text" Value="Screen Share"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
 
-                    <!-- LIVE badge — top-left, visible only while streaming -->
+                    <!-- LIVE badge -->
                     <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
                             Background="#CC1A1A1A" CornerRadius="3" Padding="6,2">
                         <Border.Style>
@@ -197,195 +256,214 @@
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
-                        <TextBlock Text="● LIVE" Foreground="LimeGreen" FontWeight="Bold" FontSize="11"/>
+                        <TextBlock Text="● LIVE" Foreground="#F44336" FontWeight="Bold" FontSize="11"/>
                     </Border>
 
                     <!-- REC badge -->
                     <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,32,0,0"
+                            Background="#CC1A1A1A" CornerRadius="3" Padding="6,2"
                             Visibility="{Binding RecBadgeVisibility}">
-                        <TextBlock Text="● REC" Foreground="Red" FontWeight="Bold"/>
+                        <TextBlock Text="● REC" Foreground="Red" FontWeight="Bold" FontSize="11"/>
                     </Border>
-                </Grid>
-            </Border>
 
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center"
-                          Background="#FF3A3A3A"/>
-
-            <!-- Side panel -->
-            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="4">
-
-                    <!-- Camera selector -->
-                    <TextBlock Text="Camera" Style="{StaticResource LabelStyle}" Margin="0,4,0,2"/>
-                    <ComboBox ItemsSource="{Binding CameraDevices}"
-                              SelectedValue="{Binding SelectedCamera, Mode=TwoWay}"
-                              IsEnabled="{Binding CanChangeSource}"
-                              Margin="0,0,0,2" Background="#FF3A3A3A" Foreground="White"/>
-                    <CheckBox Content="Screen Share" IsChecked="{Binding IsScreenShare, Mode=TwoWay}"
-                              Foreground="White" Margin="0,2,0,4"/>
-                    <Button Style="{StaticResource ActionButton}" Content="Refresh Devices"
-                            Command="{Binding RefreshDevicesCommand}" Margin="0,0,0,6"/>
-
-                    <!-- Stream URL -->
-                    <TextBlock Text="Stream URL" Style="{StaticResource LabelStyle}" Margin="0,4,0,2"/>
-                    <TextBox Text="{Binding StreamUrlDisplay, Mode=OneWay}" IsReadOnly="True"
-                             Background="#FF2B2B2B" Foreground="#FFAAAAAA"
-                             BorderBrush="#FF555555" Padding="4,3" TextWrapping="Wrap"
-                             Margin="0,0,0,6"/>
-
-                    <!-- Stream controls -->
-                    <Button Style="{StaticResource GreenButton}" Content="Start Stream"
-                            Command="{Binding StartStreamCommand}" Margin="0,0,0,2"/>
-                    <Button Style="{StaticResource RedButton}" Content="Stop Stream"
-                            Command="{Binding StopStreamCommand}" Margin="0,0,0,8"/>
-
-                    <Separator Background="#FF444444" Margin="0,4"/>
-
-                    <!-- GPS Status (WinTAK manages TAK server connection) -->
-                    <TextBlock Text="GPS" Style="{StaticResource LabelStyle}" Margin="0,4,0,2"/>
-                    <DockPanel Margin="0,0,0,8">
-                        <Ellipse Width="8" Height="8" Fill="{Binding GpsDotColor}"
-                                 VerticalAlignment="Center" Margin="0,0,6,0" DockPanel.Dock="Left"/>
-                        <TextBlock Text="{Binding GpsStatusText}" Style="{StaticResource ValueStyle}"
-                                   TextTrimming="CharacterEllipsis"/>
-                    </DockPanel>
-
-                    <Separator Background="#FF444444" Margin="0,4"/>
-
-                    <!-- Location -->
-                    <TextBlock Text="Location" Style="{StaticResource LabelStyle}" Margin="0,4,0,4"/>
-                    <Grid Margin="0,0,0,2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition/>
-                            <RowDefinition/>
-                            <RowDefinition/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Lat:" Style="{StaticResource LabelStyle}" Margin="0,0,6,2"/>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding LatText}" Style="{StaticResource ValueStyle}" Margin="0,0,0,2"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Lon:" Style="{StaticResource LabelStyle}" Margin="0,0,6,2"/>
-                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding LonText}" Style="{StaticResource ValueStyle}" Margin="0,0,0,2"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Alt:" Style="{StaticResource LabelStyle}" Margin="0,0,6,2"/>
-                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding AltText}" Style="{StaticResource ValueStyle}" Margin="0,0,0,2"/>
-                    </Grid>
-
-                    <Separator Background="#FF444444" Margin="0,4"/>
-
-                    <!-- ═══ Sensor Heading Indicator ═══ -->
-                    <TextBlock Text="Sensor Heading" Style="{StaticResource LabelStyle}" Margin="0,4,0,4"/>
-
-                    <Grid Width="140" Height="140" HorizontalAlignment="Center" Margin="0,2,0,2">
-
-                        <!-- Dashed orbit guide circle -->
-                        <Ellipse Width="118" Height="118"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center"
-                                 Stroke="#FF404040" StrokeThickness="1"
-                                 StrokeDashArray="3,5" Fill="Transparent"/>
-
-                        <!-- Cardinal tick marks -->
-                        <Canvas Width="140" Height="140">
-                            <Rectangle Canvas.Left="69" Canvas.Top="6"   Width="2" Height="6" Fill="#FF666666"/>
-                            <Rectangle Canvas.Left="69" Canvas.Top="128" Width="2" Height="6" Fill="#FF666666"/>
-                            <Rectangle Canvas.Left="128" Canvas.Top="69" Width="6" Height="2" Fill="#FF666666"/>
-                            <Rectangle Canvas.Left="6"   Canvas.Top="69" Width="6" Height="2" Fill="#FF666666"/>
-                            <TextBlock Canvas.Left="64" Canvas.Top="0" Text="N"
-                                       Foreground="#FF888888" FontSize="9" FontWeight="Bold"/>
-                        </Canvas>
-
-                        <!-- Airplane image — white silhouette, centered, non-rotating -->
-                        <Image Width="62" Height="62"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Source="pack://application:,,,/ICUVideoStreamer;component/assets/airplane.png">
-                            <!-- Compensate for ~40° natural tilt in the clipart so nose points up (North) -->
-                            <Image.RenderTransform>
-                                <RotateTransform Angle="-40" CenterX="31" CenterY="31"/>
-                            </Image.RenderTransform>
-                        </Image>
-
-                        <!-- Rotating arrow — full-canvas container spins around its center -->
-                        <Canvas Width="140" Height="140" RenderTransformOrigin="0.5,0.5">
-                            <Canvas.RenderTransform>
-                                <RotateTransform Angle="{Binding SensorHeading}"/>
-                            </Canvas.RenderTransform>
-                            <!-- Arrow points up (North) at 0°, orbits clockwise as heading increases -->
-                            <Path Canvas.Left="64" Canvas.Top="5"
-                                  Data="M6,0 L12,16 L8,13 L8,22 L4,22 L4,13 L0,16 Z"
-                                  Fill="#FF00BFFF" Stroke="#FF007ACC" StrokeThickness="0.8"/>
-                        </Canvas>
-                    </Grid>
-
-                    <!-- Heading readout -->
-                    <TextBlock HorizontalAlignment="Center" Margin="0,0,0,4"
-                               Style="{StaticResource ValueStyle}"
-                               Text="{Binding SensorHeading, StringFormat={}{0:F0}°}"/>
-
-                    <!-- Heading slider 0–360° -->
-                    <Slider Minimum="0" Maximum="360"
-                            Value="{Binding SensorHeading, Mode=TwoWay}"
-                            TickFrequency="45" IsSnapToTickEnabled="False"
-                            Margin="0,0,0,6"/>
-
-                    <!-- Elevation label + readout -->
-                    <DockPanel Margin="0,2,0,2">
-                        <TextBlock DockPanel.Dock="Left" Text="Elevation"
-                                   Style="{StaticResource LabelStyle}"/>
-                        <TextBlock DockPanel.Dock="Right"
-                                   Style="{StaticResource ValueStyle}"
-                                   Text="{Binding SensorElevation, StringFormat={}{0:F0}°}"
-                                   HorizontalAlignment="Right"/>
-                    </DockPanel>
-
-                    <!-- Elevation slider −90° (down) to +90° (up) -->
-                    <Slider Minimum="-90" Maximum="90"
-                            Value="{Binding SensorElevation, Mode=TwoWay}"
-                            TickFrequency="45" IsSnapToTickEnabled="False"
-                            Margin="0,0,0,8"/>
-
-                    <Separator Background="#FF444444" Margin="0,4"/>
-
-                    <!-- Manual location entry (expandable) -->
-                    <Button Style="{StaticResource ActionButton}" Content="Manual Location ▸"
-                            Command="{Binding ToggleManualLocationCommand}" Margin="0,4,0,2"/>
-                    <StackPanel Margin="0,0,0,4">
-                        <StackPanel.Style>
-                            <Style TargetType="StackPanel">
+                    <!-- URL readout (bottom-left) -->
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8"
+                            Background="{StaticResource IcuHud}" CornerRadius="3" Padding="6,3">
+                        <Border.Style>
+                            <Style TargetType="Border">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsManualLocationExpanded}" Value="True">
+                                    <DataTrigger Binding="{Binding IsStreaming}" Value="True">
                                         <Setter Property="Visibility" Value="Visible"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </StackPanel.Style>
-                        <TextBlock Text="Latitude" Style="{StaticResource LabelStyle}" Margin="0,4,0,2"/>
-                        <TextBox Text="{Binding ManualLat, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Background="#FF2B2B2B" Foreground="White" BorderBrush="#FF555555"
-                                 Padding="4,3" Margin="0,0,0,4"/>
-                        <TextBlock Text="Longitude" Style="{StaticResource LabelStyle}" Margin="0,0,0,2"/>
-                        <TextBox Text="{Binding ManualLon, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Background="#FF2B2B2B" Foreground="White" BorderBrush="#FF555555"
-                                 Padding="4,3" Margin="0,0,0,4"/>
-                        <TextBlock Text="Altitude (m)" Style="{StaticResource LabelStyle}" Margin="0,0,0,2"/>
-                        <TextBox Text="{Binding ManualAlt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Background="#FF2B2B2B" Foreground="White" BorderBrush="#FF555555"
-                                 Padding="4,3" Margin="0,0,0,4"/>
-                        <Button Style="{StaticResource ActionButton}" Content="Apply Location"
-                                Command="{Binding ApplyLocationCommand}"/>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{Binding StreamUrlDisplay}" Foreground="{StaticResource IcuTextDim}"
+                                       FontFamily="Consolas" FontSize="11"/>
+                            <TextBlock Text="{Binding PositionText}" Foreground="#FF888888" FontSize="10"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Control drawer (collapsible; holds WinTAK power features) -->
+            <Border Grid.Column="1" Width="200" Background="#F0161616" BorderBrush="#FF2A2A2A"
+                    BorderThickness="1,0,0,0"
+                    Visibility="{Binding ControlPanelVisible, Converter={StaticResource BoolToVis}}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="SOURCE" Style="{StaticResource LabelStyle}" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Camera" Style="{StaticResource LabelStyle}"/>
+                        <ComboBox ItemsSource="{Binding CameraDevices}"
+                                  SelectedValue="{Binding SelectedCamera, Mode=TwoWay}"
+                                  IsEnabled="{Binding CanChangeSource}" Margin="0,2,0,4"/>
+                        <CheckBox Content="Screen Share" IsChecked="{Binding IsScreenShare, Mode=TwoWay}"
+                                  IsEnabled="{Binding CanChangeSource}" Foreground="White" Margin="0,2,0,4"/>
+                        <Button Style="{StaticResource DrawerButton}" Content="Refresh Devices"
+                                Command="{Binding RefreshDevicesCommand}"/>
+
+                        <Separator Background="#FF333333" Margin="0,8"/>
+
+                        <TextBlock Text="GPS" Style="{StaticResource LabelStyle}" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <DockPanel Margin="0,0,0,4">
+                            <Ellipse Width="8" Height="8" Fill="{Binding GpsDotColor}"
+                                     VerticalAlignment="Center" Margin="0,0,6,0" DockPanel.Dock="Left"/>
+                            <TextBlock Text="{Binding GpsStatusText}" Style="{StaticResource ValueStyle}"/>
+                        </DockPanel>
+                        <Grid Margin="0,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition/><RowDefinition/><RowDefinition/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Lat:" Style="{StaticResource LabelStyle}" Margin="0,0,6,2"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding LatText}" Style="{StaticResource ValueStyle}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Lon:" Style="{StaticResource LabelStyle}" Margin="0,0,6,2"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding LonText}" Style="{StaticResource ValueStyle}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Alt:" Style="{StaticResource LabelStyle}" Margin="0,0,6,2"/>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding AltText}" Style="{StaticResource ValueStyle}"/>
+                        </Grid>
+
+                        <Separator Background="#FF333333" Margin="0,8"/>
+
+                        <!-- Sensor heading dial -->
+                        <TextBlock Text="SENSOR HEADING" Style="{StaticResource LabelStyle}" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <Grid Width="140" Height="140" HorizontalAlignment="Center" Margin="0,2">
+                            <Ellipse Width="118" Height="118" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                     Stroke="#FF404040" StrokeThickness="1" StrokeDashArray="3,5" Fill="Transparent"/>
+                            <Canvas Width="140" Height="140">
+                                <Rectangle Canvas.Left="69" Canvas.Top="6"   Width="2" Height="6" Fill="#FF666666"/>
+                                <Rectangle Canvas.Left="69" Canvas.Top="128" Width="2" Height="6" Fill="#FF666666"/>
+                                <Rectangle Canvas.Left="128" Canvas.Top="69" Width="6" Height="2" Fill="#FF666666"/>
+                                <Rectangle Canvas.Left="6"   Canvas.Top="69" Width="6" Height="2" Fill="#FF666666"/>
+                                <TextBlock Canvas.Left="64" Canvas.Top="0" Text="N" Foreground="#FF888888" FontSize="9" FontWeight="Bold"/>
+                            </Canvas>
+                            <Image Width="62" Height="62" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Source="pack://application:,,,/ICUVideoStreamer;component/assets/airplane.png">
+                                <Image.RenderTransform>
+                                    <RotateTransform Angle="-40" CenterX="31" CenterY="31"/>
+                                </Image.RenderTransform>
+                            </Image>
+                            <Canvas Width="140" Height="140" RenderTransformOrigin="0.5,0.5">
+                                <Canvas.RenderTransform>
+                                    <RotateTransform Angle="{Binding SensorHeading}"/>
+                                </Canvas.RenderTransform>
+                                <Path Canvas.Left="64" Canvas.Top="5"
+                                      Data="M6,0 L12,16 L8,13 L8,22 L4,22 L4,13 L0,16 Z"
+                                      Fill="#FF00BFFF" Stroke="#FF007ACC" StrokeThickness="0.8"/>
+                            </Canvas>
+                        </Grid>
+                        <TextBlock HorizontalAlignment="Center" Style="{StaticResource ValueStyle}"
+                                   Text="{Binding SensorHeading, StringFormat={}{0:F0}°}"/>
+                        <Slider Minimum="0" Maximum="360" Value="{Binding SensorHeading, Mode=TwoWay}"
+                                TickFrequency="45" Margin="0,2,0,6"/>
+                        <DockPanel Margin="0,2">
+                            <TextBlock DockPanel.Dock="Left" Text="Elevation" Style="{StaticResource LabelStyle}"/>
+                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource ValueStyle}"
+                                       Text="{Binding SensorElevation, StringFormat={}{0:F0}°}"/>
+                        </DockPanel>
+                        <Slider Minimum="-90" Maximum="90" Value="{Binding SensorElevation, Mode=TwoWay}"
+                                TickFrequency="45" Margin="0,0,0,6"/>
+
+                        <Separator Background="#FF333333" Margin="0,8"/>
+
+                        <Button Style="{StaticResource DrawerButton}" Content="Manual Location ▸"
+                                Command="{Binding ToggleManualLocationCommand}"/>
+                        <StackPanel Visibility="{Binding IsManualLocationExpanded, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="Latitude" Style="{StaticResource LabelStyle}" Margin="0,4,0,2"/>
+                            <TextBox Text="{Binding ManualLat, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Background="#FF2A2A2A" Foreground="White" BorderBrush="#FF555555" Padding="4,3" Margin="0,0,0,4"/>
+                            <TextBlock Text="Longitude" Style="{StaticResource LabelStyle}" Margin="0,0,0,2"/>
+                            <TextBox Text="{Binding ManualLon, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Background="#FF2A2A2A" Foreground="White" BorderBrush="#FF555555" Padding="4,3" Margin="0,0,0,4"/>
+                            <TextBlock Text="Altitude (m)" Style="{StaticResource LabelStyle}" Margin="0,0,0,2"/>
+                            <TextBox Text="{Binding ManualAlt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Background="#FF2A2A2A" Foreground="White" BorderBrush="#FF555555" Padding="4,3" Margin="0,0,0,4"/>
+                            <Button Style="{StaticResource DrawerButton}" Content="Apply Location"
+                                    Command="{Binding ApplyLocationCommand}"/>
+                        </StackPanel>
                     </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Right-edge quick-action column -->
+            <Border Grid.Column="2" Background="{StaticResource IcuHud}" Padding="8,10">
+                <StackPanel VerticalAlignment="Center">
+
+                    <!-- Broadcast / Stop -->
+                    <Button Command="{Binding BroadcastCommand}" ToolTip="Broadcast">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource QuickButton}"/>
+                        </Button.Style>
+                        <Grid>
+                            <!-- Broadcast glyph (idle) -->
+                            <Canvas Width="24" Height="24">
+                                <Canvas.Style>
+                                    <Style TargetType="Canvas">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStreaming}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Canvas.Style>
+                                <Ellipse Canvas.Left="10" Canvas.Top="10" Width="4" Height="4" Fill="White"/>
+                                <Path Data="M8,8 A6,6 0 0 0 8,16" Stroke="White" StrokeThickness="1.6"/>
+                                <Path Data="M16,8 A6,6 0 0 1 16,16" Stroke="White" StrokeThickness="1.6"/>
+                                <Path Data="M5,5 A10,10 0 0 0 5,19" Stroke="White" StrokeThickness="1.6" Opacity="0.7"/>
+                                <Path Data="M19,5 A10,10 0 0 1 19,19" Stroke="White" StrokeThickness="1.6" Opacity="0.7"/>
+                            </Canvas>
+                            <!-- Stop glyph (live) -->
+                            <Rectangle Width="14" Height="14" RadiusX="2" RadiusY="2" Fill="#F44336">
+                                <Rectangle.Style>
+                                    <Style TargetType="Rectangle">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStreaming}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Rectangle.Style>
+                            </Rectangle>
+                        </Grid>
+                    </Button>
+                    <TextBlock Style="{StaticResource QuickLabel}" Text="{Binding BroadcastLabel}"/>
+
+                    <!-- Record -->
+                    <Button Command="{Binding RecordCommand}" Style="{StaticResource QuickButton}" ToolTip="Arm/disarm recording">
+                        <Grid Width="24" Height="24">
+                            <Ellipse Width="16" Height="16" Stroke="White" StrokeThickness="1.6"/>
+                            <Ellipse Width="9" Height="9" Fill="#F44336"/>
+                        </Grid>
+                    </Button>
+                    <TextBlock Style="{StaticResource QuickLabel}" Text="Record"/>
+
+                    <!-- Snapshot -->
+                    <Button Command="{Binding SnapshotCommand}" Style="{StaticResource QuickButton}" ToolTip="Snapshot + marker">
+                        <Grid Width="24" Height="24">
+                            <Path Fill="White"
+                                  Data="M4,8 h3 l1.5,-2 h5 l1.5,2 h3 a1,1 0 0 1 1,1 v9 a1,1 0 0 1 -1,1 h-16 a1,1 0 0 1 -1,-1 v-9 a1,1 0 0 1 1,-1 Z"/>
+                            <Ellipse Width="7" Height="7" Fill="#0A0A0A" Margin="0,2,0,0"/>
+                            <Ellipse Width="4" Height="4" Fill="White" Margin="0,2,0,0"/>
+                        </Grid>
+                    </Button>
+                    <TextBlock Style="{StaticResource QuickLabel}" Text="Snapshot"/>
 
                 </StackPanel>
-            </ScrollViewer>
+            </Border>
         </Grid>
 
-        <!-- Status bar -->
-        <Border Grid.Row="2" Background="#FF252525" Padding="8,3">
+        <!-- ═══ Status bar ═══ -->
+        <Border Grid.Row="2" Background="#FF141414" Padding="8,3">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Right" Text="{Binding BuildDateText}"
-                           Style="{StaticResource LabelStyle}" Foreground="#FF666666"
-                           FontSize="10" Margin="12,0,0,0"/>
+                           Style="{StaticResource LabelStyle}" Foreground="#FF555555" FontSize="10" Margin="12,0,0,0"/>
                 <TextBlock DockPanel.Dock="Right" Text="{Binding ClockText}"
                            Style="{StaticResource LabelStyle}" Margin="8,0,0,0"/>
                 <TextBlock Text="{Binding StatusText}" Style="{StaticResource LabelStyle}"

@@ -7,7 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
-namespace ICUVideoStreamer.Services
+namespace ICUVideoStreamer.Capture
 {
     public sealed class CameraPreviewService : IDisposable
     {

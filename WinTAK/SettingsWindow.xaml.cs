@@ -1,31 +1,25 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using Microsoft.Win32;
 using ICUVideoStreamer.Models;
+using ICUVideoStreamer.Serve;
 
 namespace ICUVideoStreamer
 {
+    /// <summary>
+    /// The Broadcast Settings dialog. Mirrors the ATAK plugin's settings dialog fields
+    /// (alias / destination / protocol / address / port / path / credentials / resolution
+    /// / frame rate / bitrate / rotation) plus WinTAK-specific encoding and KLV sensor tabs.
+    /// </summary>
     public partial class SettingsWindow : Window
     {
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         private readonly AppSettings _settings;
-
-        private static readonly string[] ProtocolDefaults =
-        {
-            "rtmp://localhost/live",         // RTMP
-            "rtmps://localhost/live",        // RTMPS
-            "rtsp://localhost:8554/stream",  // RTSP
-            "rtsps://localhost:8554/stream", // RTSPS
-            "srt://localhost:9000",          // SRT
-            "udp://239.2.3.1:6969",          // UDP
-        };
-
-        private static readonly string[] Protocols =
-            { "RTMP", "RTMPS", "RTSP", "RTSPS", "SRT", "UDP" };
 
         public SettingsWindow(AppSettings settings)
         {
@@ -37,74 +31,116 @@ namespace ICUVideoStreamer
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            // Force Win32 keyboard focus to this window — WinTAK's input manager
-            // can swallow key events from hosted plugin dialogs without this.
-            var helper = new WindowInteropHelper(this);
-            SetForegroundWindow(helper.Handle);
+            // Force Win32 focus — WinTAK's input manager can swallow keys from plugin dialogs.
+            SetForegroundWindow(new WindowInteropHelper(this).Handle);
             Activate();
         }
 
+        // ── Load ────────────────────────────────────────────────────────────────────
+
         private void LoadSettings()
         {
-            // Stream tab
-            int protoIdx = Array.IndexOf(Protocols, (_settings.StreamProtocol ?? "RTMP").ToUpperInvariant());
-            CboProtocol.SelectedIndex = protoIdx >= 0 ? protoIdx : 0;
-            TxtStreamUrl.Text = _settings.StreamUrl;
-            TxtStreamKey.Text = _settings.StreamKey;
-            TxtUsername.Text = _settings.StreamUsername;
-            PwdPassword.Password = _settings.StreamPassword;
-            TxtFfmpegPath.Text = _settings.FfmpegPath;
-            TxtFfmpegPath.TextChanged += (s, e) => UpdateFfmpegResolvedLabel();
-            UpdateFfmpegResolvedLabel();
-            ChkUseTls.IsChecked = _settings.UseTls;
-            TxtCertPath.Text = _settings.CertificatePath;
+            TxtAlias.Text = _settings.Alias;
 
-            // Video tab
-            SelectComboItem(CboVideoCodec, _settings.VideoCodec ?? "H264");
-            CboResolution.Text = _settings.Resolution ?? "1280x720";
+            CboDestination.SelectedIndex =
+                string.Equals(_settings.Destination, "LAN", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+
+            CboProtocol.SelectedIndex = ProtocolIndex(_settings.PushProtocol);
+            TxtHost.Text     = _settings.ServerHost;
+            TxtPort.Text     = _settings.ServerPort.ToString();
+            TxtPath.Text     = _settings.StreamPath;
+            TxtUsername.Text = _settings.ServerUsername;
+            PwdPassword.Password = _settings.ServerPassword;
+
+            CboResolution.SelectedIndex = ResolutionIndex(_settings.Resolution);
             CboFrameRate.Text = _settings.FrameRate.ToString();
             SldrBitrate.Value = _settings.VideoBitrate;
             TxtBitrateLabel.Text = _settings.VideoBitrate + " kbps";
-            ChkEnableRecording.IsChecked = _settings.EnableRecording;
-            TxtRecordingPath.Text = _settings.RecordingPath;
-            ChkScreenShare.IsChecked = _settings.EnableScreenShare;
+            CboRotation.SelectedIndex = RotationIndex(_settings.RotationDegrees);
 
-            // Audio tab
+            SelectComboItem(CboVideoCodec, _settings.VideoCodec ?? "H264");
             TxtAudioDevice.Text = _settings.AudioDevice;
             SelectComboItem(CboAudioCodec, _settings.AudioCodec ?? "AAC");
             CboAudioBitrate.Text = _settings.AudioBitrate.ToString();
             ChkMuteAudio.IsChecked = _settings.MuteAudio;
+            ChkEnableRecording.IsChecked = _settings.EnableRecording;
+            TxtRecordingPath.Text = _settings.RecordingPath;
+            TxtRecordingPath.IsEnabled = _settings.EnableRecording;
+
+            TxtFfmpegPath.Text = _settings.FfmpegPath;
+            TxtFfmpegPath.TextChanged += (s, e) => UpdateFfmpegResolvedLabel();
+            UpdateFfmpegResolvedLabel();
+
+            TxtSensorName.Text = _settings.SensorName;
+            TxtHFov.Text = _settings.SensorHFov.ToString("0.#");
+            TxtVFov.Text = _settings.SensorVFov.ToString("0.#");
+
+            UpdateServerGroupVisibility();
         }
+
+        // ── Apply ───────────────────────────────────────────────────────────────────
 
         private void ApplyToSettings()
         {
-            // Stream
-            _settings.StreamProtocol = GetComboText(CboProtocol);
-            _settings.StreamUrl = TxtStreamUrl.Text;
-            _settings.StreamKey = TxtStreamKey.Text;
-            _settings.StreamUsername = TxtUsername.Text;
-            _settings.StreamPassword = PwdPassword.Visibility == Visibility.Visible
+            _settings.Alias       = NonEmpty(TxtAlias.Text, "VIDEO_1");
+            _settings.Destination = CboDestination.SelectedIndex == 0 ? "LAN" : "SERVER";
+            _settings.PushProtocol = ProtocolFromIndex(CboProtocol.SelectedIndex);
+            _settings.ServerHost   = TxtHost.Text?.Trim() ?? "";
+            _settings.ServerPort   = ParseInt(TxtPort.Text, MediaServerConfig.DefaultPort(
+                                        (MediaServerConfig.PushProtocol)Enum.Parse(
+                                            typeof(MediaServerConfig.PushProtocol),
+                                            ProtocolFromIndex(CboProtocol.SelectedIndex))));
+            _settings.StreamPath   = NonEmpty(TxtPath.Text, "icu");
+            _settings.ServerUsername = TxtUsername.Text ?? "";
+            _settings.ServerPassword = PwdPassword.Visibility == Visibility.Visible
                 ? PwdPassword.Password
                 : TxtPasswordVisible.Text;
-            _settings.FfmpegPath = TxtFfmpegPath.Text;
-            _settings.UseTls = ChkUseTls.IsChecked == true;
-            _settings.CertificatePath = TxtCertPath.Text;
+            ApplyPastedAddress();
 
-            // Video
-            _settings.VideoCodec = GetComboText(CboVideoCodec);
-            _settings.Resolution = CboResolution.Text;
+            _settings.Resolution      = ResolutionFromIndex(CboResolution.SelectedIndex);
             if (int.TryParse(CboFrameRate.Text, out int fps)) _settings.FrameRate = fps;
-            _settings.VideoBitrate = (int)SldrBitrate.Value;
-            _settings.EnableRecording = ChkEnableRecording.IsChecked == true;
-            _settings.RecordingPath = TxtRecordingPath.Text;
-            _settings.EnableScreenShare = ChkScreenShare.IsChecked == true;
+            _settings.VideoBitrate    = (int)SldrBitrate.Value;
+            _settings.RotationDegrees = RotationFromIndex(CboRotation.SelectedIndex);
 
-            // Audio
-            _settings.AudioDevice = TxtAudioDevice.Text;
-            _settings.AudioCodec = GetComboText(CboAudioCodec);
+            _settings.VideoCodec   = GetComboText(CboVideoCodec);
+            _settings.AudioDevice  = TxtAudioDevice.Text ?? "";
+            _settings.AudioCodec   = GetComboText(CboAudioCodec);
             if (int.TryParse(CboAudioBitrate.Text, out int ab)) _settings.AudioBitrate = ab;
-            _settings.MuteAudio = ChkMuteAudio.IsChecked == true;
+            _settings.MuteAudio       = ChkMuteAudio.IsChecked == true;
+            _settings.EnableRecording = ChkEnableRecording.IsChecked == true;
+            _settings.RecordingPath   = TxtRecordingPath.Text ?? "";
+
+            _settings.FfmpegPath = TxtFfmpegPath.Text ?? "";
+
+            _settings.SensorName = NonEmpty(TxtSensorName.Text, "WinTAK-ICU");
+            if (double.TryParse(TxtHFov.Text, out double hf)) _settings.SensorHFov = hf;
+            if (double.TryParse(TxtVFov.Text, out double vf)) _settings.SensorVFov = vf;
         }
+
+        /// <summary>If a full URL was pasted into the address box, split scheme/host/port/path.</summary>
+        private void ApplyPastedAddress()
+        {
+            string h = _settings.ServerHost?.Trim() ?? "";
+            if (h.Length == 0) return;
+            int scheme = h.IndexOf("://", StringComparison.Ordinal);
+            if (scheme >= 0) h = h.Substring(scheme + 3);
+            int slash = h.IndexOf('/');
+            if (slash >= 0)
+            {
+                string p = h.Substring(slash + 1).Trim();
+                if (p.Length > 0) _settings.StreamPath = p;
+                h = h.Substring(0, slash);
+            }
+            int colon = h.IndexOf(':');
+            if (colon >= 0)
+            {
+                if (int.TryParse(h.Substring(colon + 1).Trim(), out int port)) _settings.ServerPort = port;
+                h = h.Substring(0, colon);
+            }
+            _settings.ServerHost = h;
+        }
+
+        // ── Buttons ───────────────────────────────────────────────────────────────
 
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
@@ -119,96 +155,40 @@ namespace ICUVideoStreamer
             Close();
         }
 
-        private static readonly string[] Schemes =
-            { "rtmp://", "rtmps://", "rtsp://", "rtsps://", "srt://", "udp://" };
+        private void CboDestination_SelectionChanged(object sender, SelectionChangedEventArgs e)
+            => UpdateServerGroupVisibility();
 
-        // Default ports per protocol index — 0 means no port in URL (scheme default)
-        private static readonly int[] DefaultPorts = { 1935, 443, 8554, 8554, 9000, 6969 };
-
-        private void CboProtocol_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        private void UpdateServerGroupVisibility()
         {
-            if (TxtStreamUrl == null) return;
-            int idx = CboProtocol.SelectedIndex;
-            if (idx < 0 || idx >= ProtocolDefaults.Length) return;
-
-            string current = TxtStreamUrl.Text ?? "";
-
-            if (string.IsNullOrWhiteSpace(current))
-            {
-                TxtStreamUrl.Text = ProtocolDefaults[idx];
-                return;
-            }
-
-            // Swap scheme prefix, then fix the port
-            foreach (string scheme in Schemes)
-            {
-                if (current.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))
-                {
-                    string withoutScheme = current.Substring(scheme.Length);
-                    TxtStreamUrl.Text = Schemes[idx] + SwapPort(withoutScheme, DefaultPorts[idx]);
-                    return;
-                }
-            }
-
-            // No recognised scheme — replace the whole URL with the default
-            TxtStreamUrl.Text = ProtocolDefaults[idx];
+            if (ServerGroup != null)
+                ServerGroup.Visibility = CboDestination.SelectedIndex == 1
+                    ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        // Replaces a known default port in the authority section of a scheme-stripped URL,
-        // or appends the new port if none was present. Custom (unknown) ports are left alone.
-        private static string SwapPort(string withoutScheme, int newPort)
+        private void CboProtocol_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            // Split authority from path
-            int slashPos = withoutScheme.IndexOf('/');
-            string authority = slashPos >= 0 ? withoutScheme.Substring(0, slashPos) : withoutScheme;
-            string pathEtc   = slashPos >= 0 ? withoutScheme.Substring(slashPos)    : "";
+            if (TxtPort == null) return;
+            var proto = (MediaServerConfig.PushProtocol)Enum.Parse(
+                typeof(MediaServerConfig.PushProtocol), ProtocolFromIndex(CboProtocol.SelectedIndex));
+            int def = MediaServerConfig.DefaultPort(proto);
 
-            // Separate userinfo (user:pass@) from host[:port]
-            int atPos    = authority.LastIndexOf('@');
-            string userInfo = atPos >= 0 ? authority.Substring(0, atPos + 1) : "";
-            string hostPort = atPos >= 0 ? authority.Substring(atPos + 1)    : authority;
-
-            // Detect existing port
-            int colonPos   = hostPort.LastIndexOf(':');
-            string host    = colonPos >= 0 ? hostPort.Substring(0, colonPos) : hostPort;
-            string portStr = colonPos >= 0 ? hostPort.Substring(colonPos + 1) : "";
-
-            bool hasKnownPort = int.TryParse(portStr, out int existingPort)
-                                && Array.IndexOf(DefaultPorts, existingPort) >= 0;
-            bool hasNoPort    = string.IsNullOrEmpty(portStr);
-
-            if (hasKnownPort || hasNoPort)
-                // Replace with new protocol's default
-                return userInfo + host + ":" + newPort + pathEtc;
-
-            // Custom port — leave it untouched, just keep the existing authority
-            return userInfo + hostPort + pathEtc;
+            // Only overwrite the port when it is empty or a known protocol default.
+            bool isDefaultPort =
+                int.TryParse(TxtPort.Text, out int cur) &&
+                (cur == 1935 || cur == 8554 || cur == 8890);
+            if (string.IsNullOrWhiteSpace(TxtPort.Text) || isDefaultPort)
+                TxtPort.Text = def.ToString();
         }
 
         private void SldrBitrate_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (TxtBitrateLabel != null)
-                TxtBitrateLabel.Text = ((int)e.NewValue) + " kbps";
+            if (TxtBitrateLabel != null) TxtBitrateLabel.Text = ((int)e.NewValue) + " kbps";
         }
 
         private void ChkRecording_Changed(object sender, RoutedEventArgs e)
         {
             if (TxtRecordingPath != null)
                 TxtRecordingPath.IsEnabled = ChkEnableRecording.IsChecked == true;
-        }
-
-        private void UpdateFfmpegResolvedLabel()
-        {
-            string custom = TxtFfmpegPath.Text?.Trim();
-            bool usingCustom = !string.IsNullOrEmpty(custom) && System.IO.File.Exists(custom);
-            bool bundledExists = System.IO.File.Exists(AppSettings.BundledFfmpegPath);
-
-            if (usingCustom)
-                TxtFfmpegResolved.Text = "Using: " + custom;
-            else if (bundledExists)
-                TxtFfmpegResolved.Text = "Using bundled: " + AppSettings.BundledFfmpegPath;
-            else
-                TxtFfmpegResolved.Text = "Warning: bundled ffmpeg.exe not found at " + AppSettings.BundledFfmpegPath;
         }
 
         private void BtnShowPassword_Click(object sender, RoutedEventArgs e)
@@ -236,19 +216,7 @@ namespace ICUVideoStreamer
                 Filter = "FFmpeg executable|ffmpeg.exe|All files|*.*",
                 Title = "Select FFmpeg executable"
             };
-            if (dlg.ShowDialog() == true)
-                TxtFfmpegPath.Text = dlg.FileName;
-        }
-
-        private void BrowseCert_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new OpenFileDialog
-            {
-                Filter = "Certificate files|*.pem;*.crt;*.cer;*.p12;*.pfx|All files|*.*",
-                Title = "Select Certificate"
-            };
-            if (dlg.ShowDialog() == true)
-                TxtCertPath.Text = dlg.FileName;
+            if (dlg.ShowDialog() == true) TxtFfmpegPath.Text = dlg.FileName;
         }
 
         private void BrowseRecording_Click(object sender, RoutedEventArgs e)
@@ -262,12 +230,72 @@ namespace ICUVideoStreamer
             }
         }
 
-        private static void SelectComboItem(System.Windows.Controls.ComboBox cbo, string value)
+        private void UpdateFfmpegResolvedLabel()
+        {
+            string custom = TxtFfmpegPath.Text?.Trim();
+            bool usingCustom = !string.IsNullOrEmpty(custom) && System.IO.File.Exists(custom);
+            bool bundledExists = System.IO.File.Exists(AppSettings.BundledFfmpegPath);
+
+            if (usingCustom)
+                TxtFfmpegResolved.Text = "Using: " + custom;
+            else if (bundledExists)
+                TxtFfmpegResolved.Text = "Using bundled: " + AppSettings.BundledFfmpegPath;
+            else
+                TxtFfmpegResolved.Text = "Warning: bundled ffmpeg.exe not found at " + AppSettings.BundledFfmpegPath;
+        }
+
+        // ── Index <-> value mappings ────────────────────────────────────────────────
+
+        private static int ProtocolIndex(string p)
+        {
+            switch ((p ?? "RTSP").ToUpperInvariant())
+            {
+                case "RTMP": return 0;
+                case "SRT":  return 2;
+                default:     return 1; // RTSP
+            }
+        }
+        private static string ProtocolFromIndex(int i)
+        {
+            switch (i) { case 0: return "RTMP"; case 2: return "SRT"; default: return "RTSP"; }
+        }
+
+        private static int ResolutionIndex(string r)
+        {
+            switch ((r ?? "P720").ToUpperInvariant())
+            {
+                case "P480":  return 0;
+                case "P1080": return 2;
+                default:      return 1; // P720
+            }
+        }
+        private static string ResolutionFromIndex(int i)
+        {
+            switch (i) { case 0: return "P480"; case 2: return "P1080"; default: return "P720"; }
+        }
+
+        private static int RotationIndex(int deg)
+        {
+            switch (((deg % 360) + 360) % 360) { case 90: return 1; case 180: return 2; case 270: return 3; default: return 0; }
+        }
+        private static int RotationFromIndex(int i)
+        {
+            switch (i) { case 1: return 90; case 2: return 180; case 3: return 270; default: return 0; }
+        }
+
+        // ── Small helpers ────────────────────────────────────────────────────────────
+
+        private static string NonEmpty(string s, string def) =>
+            string.IsNullOrWhiteSpace(s) ? def : s.Trim();
+
+        private static int ParseInt(string s, int def) =>
+            int.TryParse((s ?? "").Trim(), out int v) ? v : def;
+
+        private static void SelectComboItem(ComboBox cbo, string value)
         {
             foreach (var item in cbo.Items)
             {
-                string text = item is System.Windows.Controls.ComboBoxItem ci
-                    ? ci.Content?.ToString() : item?.ToString();
+                string text = item is ComboBoxItem ci ? ci.Content?.ToString() : item?.ToString();
                 if (string.Equals(text, value, StringComparison.OrdinalIgnoreCase))
                 {
                     cbo.SelectedItem = item;
@@ -277,10 +305,9 @@ namespace ICUVideoStreamer
             cbo.SelectedIndex = 0;
         }
 
-        private static string GetComboText(System.Windows.Controls.ComboBox cbo)
+        private static string GetComboText(ComboBox cbo)
         {
-            if (cbo.SelectedItem is System.Windows.Controls.ComboBoxItem ci)
-                return ci.Content?.ToString() ?? "";
+            if (cbo.SelectedItem is ComboBoxItem ci) return ci.Content?.ToString() ?? "";
             return cbo.Text ?? "";
         }
     }
