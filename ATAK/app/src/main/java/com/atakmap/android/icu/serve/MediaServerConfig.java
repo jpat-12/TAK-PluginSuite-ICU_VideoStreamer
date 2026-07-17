@@ -14,7 +14,7 @@ public class MediaServerConfig {
         SERVER   // push to a media server which re-serves RTSP/RTSPS/SRT/RTMP
     }
 
-    public Destination destination = Destination.LAN;
+    public Destination destination = Destination.SERVER;
 
     /** Which protocol the phone uses to PUSH to the server. */
     public enum PushProtocol {
@@ -23,14 +23,14 @@ public class MediaServerConfig {
         PushProtocol(int p) { this.defaultPort = p; }
     }
 
-    public PushProtocol pushProtocol = PushProtocol.RTMP;
+    public PushProtocol pushProtocol = PushProtocol.RTSP;
 
     public String alias      = "VIDEO_1"; // TAK ICU "Broadcast Alias"
     public String host       = "";        // server address (empty = LAN only)
     public String streamPath = "icu";     // server path / stream name
     public String username   = "";        // optional server credentials
     public String password   = "";
-    public int    serverPort = 1935;      // the port the user publishes to
+    public int    serverPort = 8554;      // the port the user publishes to (RTSP default)
 
     /** The URL the phone publishes to, per selected protocol. */
     public String pushUrl() {
@@ -54,12 +54,9 @@ public class MediaServerConfig {
 
     public String protocolName() { return pushProtocol.name(); }
 
-    /**
-     * True whenever a server address is set. (We push if you gave us a server —
-     * the on-device LAN RTSP always runs regardless, so this only adds a target.)
-     */
+    /** True only when the destination is SERVER and an address is set. */
     public boolean pushEnabled() {
-        return host != null && !host.trim().isEmpty();
+        return destination == Destination.SERVER && host != null && !host.trim().isEmpty();
     }
 
     public boolean isConfigured() { return host != null && !host.trim().isEmpty(); }

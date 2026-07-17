@@ -34,7 +34,8 @@ import com.atakmap.android.icu.serve.RtspPushTransport;
 import com.atakmap.android.icu.serve.SrtTransport;
 import com.atakmap.android.icu.serve.StreamEndpoint;
 import com.atakmap.android.icu.serve.TransportManager;
-import com.atakmap.android.icu.share.SelfMarkerSensorController;
+import com.atakmap.android.icu.share.StreamSensorMarker;
+import com.atakmap.android.icu.util.NetworkUtils;
 import com.atakmap.android.icu.util.Prefs;
 import com.atakmap.android.maps.MapView;
 import com.atakmap.coremap.log.Log;
@@ -63,7 +64,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private final CapturePipeline   pipeline     = new CapturePipeline();
     private final EncoderConfig     config       = new EncoderConfig();
     private final MediaServerConfig serverConfig = new MediaServerConfig();
-    private final SelfMarkerSensorController sensor = new SelfMarkerSensorController();
+    private final StreamSensorMarker sensor = new StreamSensorMarker();
 
     private TransportManager transports;
 
@@ -71,9 +72,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private TextView    destBadge;
     private TextView    urlsText;
     private TextView    previewHint;
+    private TextView    broadcastLabel;
     private View        liveDot;
-    private Button      broadcastButton;
-    private ImageButton flipButton;
+    private ImageButton broadcastButton;
+    private ImageButton recordButton;
+    private ImageButton snapshotButton;
     private ImageButton settingsButton;
     private TextureView previewView;
     private volatile Surface previewSurface;
@@ -88,19 +91,21 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         destBadge       = root.findViewById(R.id.icu_dest_badge);
         urlsText        = root.findViewById(R.id.icu_urls);
         previewHint     = root.findViewById(R.id.icu_preview_hint);
+        broadcastLabel  = root.findViewById(R.id.icu_broadcast_label);
         liveDot         = root.findViewById(R.id.icu_live_dot);
         broadcastButton = root.findViewById(R.id.icu_broadcast_button);
-        flipButton      = root.findViewById(R.id.icu_flip_button);
+        recordButton    = root.findViewById(R.id.icu_record_button);
+        snapshotButton  = root.findViewById(R.id.icu_snapshot_button);
         settingsButton  = root.findViewById(R.id.icu_settings_button);
 
         setupPreview();
 
         Prefs.load(pluginContext, serverConfig, config);
-        sensor.register();
         refreshDestBadge();
 
         broadcastButton.setOnClickListener(v -> toggleBroadcast());
-        flipButton.setOnClickListener(v -> flipCamera());
+        recordButton.setOnClickListener(v -> takeRecord());
+        snapshotButton.setOnClickListener(v -> takeSnapshot());
         settingsButton.setOnClickListener(v -> showSettingsDialog());
 
         setRetain(true);
@@ -197,14 +202,16 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         broadcastButton.setEnabled(false);
 
         // Serve layer first, so transports are ready before frames flow.
+        // Exclusive by destination: SERVER pushes only; LAN serves on-device only.
         transports = new TransportManager();
-        transports.register(new OnDeviceRtspTransport());          // always available (LAN)
         if (serverConfig.pushEnabled()) {
             switch (serverConfig.pushProtocol) {                    // user-selected push protocol
                 case RTSP: transports.register(new RtspPushTransport(serverConfig)); break;
                 case SRT:  transports.register(new SrtTransport(serverConfig, serverConfig.serverPort)); break;
                 default:   transports.register(new RtmpPushTransport(serverConfig)); break;
             }
+        } else {
+            transports.register(new OnDeviceRtspTransport());       // LAN: peers pull from phone
         }
         transports.setErrorListener((name, message) ->
                 ui.post(() -> Toast.makeText(pluginContext,
@@ -217,10 +224,18 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                 ui.post(() -> {
                     applyPreviewRotation();
                     broadcastButton.setEnabled(true);
-                    broadcastButton.setText(R.string.icu_stop);
+                    broadcastButton.setImageResource(R.drawable.ic_stop);
+                    broadcastButton.setBackgroundResource(R.drawable.bg_hud_button_danger);
+                    broadcastLabel.setText(R.string.icu_stop);
                     liveDot.setVisibility(View.VISIBLE);
                     previewHint.setVisibility(View.GONE);
-                    if (transports != null) sensor.start(transports.allEndpoints());
+                    root.setKeepScreenOn(true);   // don't let the phone sleep while streaming
+                    // Drop a sensor marker carrying the reachable URL (server when pushing,
+                    // else the on-device LAN URL). Deterministic — not gated on connect state.
+                    String sensorUrl = serverConfig.pushEnabled()
+                            ? serverConfig.viewUrl()
+                            : NetworkUtils.rtspUrl(8554, "/live");
+                    sensor.start(sensorUrl, serverConfig.alias);
                     updateLiveStatus(0);
                 });
             }
@@ -246,13 +261,80 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         resetIdleUi();
     }
 
-    private void flipCamera() {
-        config.useFrontCamera = !config.useFrontCamera;
-        Prefs.save(pluginContext, serverConfig, config);
-        Toast.makeText(atakContext(),
-                config.useFrontCamera ? "Front camera" : "Rear camera", Toast.LENGTH_SHORT).show();
-        if (pipeline.isRunning()) { stopBroadcast(); startBroadcast(); }
-        else applyPreviewRotation();
+    /** Capture the current preview frame to a PNG in the plugin's external files dir. */
+    private void takeSnapshot() {
+        if (!pipeline.isRunning()) {
+            Toast.makeText(atakContext(), "Start broadcasting first.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        android.graphics.Bitmap bmp = previewView.getBitmap();
+        if (bmp == null) {
+            Toast.makeText(atakContext(), "No frame to capture yet.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            // Keep a local copy on the device (plugin external files dir).
+            java.io.File dir = new java.io.File(atakContext().getExternalFilesDir(null), "ICU/snapshots");
+            dir.mkdirs();
+            String name = "ICU_" + System.currentTimeMillis() + ".png";
+            java.io.File f = new java.io.File(dir, name);
+            java.io.FileOutputStream os = new java.io.FileOutputStream(f);
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, os);
+            os.close();
+            Log.d(TAG, "snapshot → " + f.getAbsolutePath());
+            // Drop a map marker at the current position with this image attached.
+            boolean marked = dropSnapshotMarker(f, name);
+            Toast.makeText(atakContext(),
+                    marked ? "Snapshot saved + marker dropped" : "Snapshot saved: " + name,
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(atakContext(), "Snapshot failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * Place a marker on the map at the phone's current position and attach the snapshot
+     * image to it (copied into ATAK's attachment store for that marker). Returns true if
+     * the marker was placed. The original {@code imageFile} stays on the device.
+     */
+    private boolean dropSnapshotMarker(java.io.File imageFile, String name) {
+        try {
+            MapView mv = getMapView();
+            com.atakmap.coremap.maps.coords.GeoPoint p = null;
+            com.atakmap.android.maps.Marker self = mv.getSelfMarker();
+            if (self != null && self.getPoint() != null && self.getPoint().isValid())
+                p = self.getPoint();
+            if (p == null && mv.getCenterPoint() != null) p = mv.getCenterPoint().get();
+            if (p == null || !p.isValid()) {
+                Log.w(TAG, "snapshot marker: no valid position");
+                return false;
+            }
+
+            String uid = "ICU-SNAP-" + System.currentTimeMillis();
+            String callsign = serverConfig.alias + " snapshot";
+            com.atakmap.android.maps.Marker m =
+                    new com.atakmap.android.user.PlacePointTool.MarkerCreator(p)
+                            .setUid(uid)
+                            .setType("b-m-p-s-m")          // generic spot marker
+                            .setCallsign(callsign)
+                            .showCotDetails(false)
+                            .placePoint();
+            if (m == null) return false;
+
+            com.atakmap.android.util.AttachmentManager.addAttachment(m, imageFile);
+            com.atakmap.android.util.AttachmentManager.notifyAttachmentChange(m.getUID());
+            m.persist(mv.getMapEventDispatcher(), null, this.getClass());
+            Log.d(TAG, "snapshot marker " + uid + " (" + name + ")");
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "snapshot marker failed: " + t.getMessage());
+            return false;
+        }
+    }
+
+    /** Local MP4 recording — planned; the encoded stream is already flowing to transports. */
+    private void takeRecord() {
+        Toast.makeText(atakContext(), "Local recording is coming soon.", Toast.LENGTH_SHORT).show();
     }
 
     // ── Status UI ────────────────────────────────────────────────────────────────
@@ -285,8 +367,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     }
 
     private void resetIdleUi() {
+        root.setKeepScreenOn(false);   // allow normal sleep again
         broadcastButton.setEnabled(true);
-        broadcastButton.setText(R.string.icu_broadcast);
+        broadcastButton.setImageResource(R.drawable.ic_broadcast);
+        broadcastButton.setBackgroundResource(R.drawable.bg_hud_button);
+        broadcastLabel.setText(R.string.icu_broadcast);
         liveDot.setVisibility(View.GONE);
         previewHint.setVisibility(View.VISIBLE);
         urlsText.setVisibility(View.GONE);
@@ -303,7 +388,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     // ── Settings dialog (gear) ───────────────────────────────────────────────────
 
     // Selection state while the dialog is open (indices into the string arrays).
-    private final int[] sel = new int[5]; // 0=dest 1=res 2=fps 3=rot 4=protocol
+    private final int[] sel = new int[6]; // 0=dest 1=res 2=fps 3=rot 4=protocol 5=camera
 
     /**
      * Fully programmatic settings dialog built from the ATAK activity context, with
@@ -326,12 +411,14 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             final CharSequence[] resOpts  = pta(R.array.icu_resolutions);
             final CharSequence[] fpsOpts  = pta(R.array.icu_framerates);
             final CharSequence[] rotOpts  = pta(R.array.icu_rotations);
+            final CharSequence[] camOpts  = pta(R.array.icu_cameras);
 
             sel[0] = serverConfig.destination == MediaServerConfig.Destination.SERVER ? 1 : 0;
             sel[1] = config.resolution.ordinal();
             sel[2] = fpsIndex(config.fps);
             sel[3] = rotationIndex(config.rotationDegrees);
             sel[4] = serverConfig.pushProtocol.ordinal();
+            sel[5] = config.useFrontCamera ? 1 : 0;
 
             final EditText alias = addEdit(ctx, form, ps(R.string.icu_alias),
                     serverConfig.alias, android.text.InputType.TYPE_CLASS_TEXT);
@@ -360,6 +447,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             final EditText bitrate = addEdit(ctx, form, ps(R.string.icu_bitrate),
                     Integer.toString(config.bitrateKbps), android.text.InputType.TYPE_CLASS_NUMBER);
             final Button rotBtn = addPicker(ctx, form, ps(R.string.icu_rotation), rotOpts[sel[3]]);
+            final Button camBtn = addPicker(ctx, form, ps(R.string.icu_camera), camOpts[sel[5]]);
 
             destBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_destination), destOpts, i -> {
                 sel[0] = i; destBtn.setText(destOpts[i]);
@@ -373,6 +461,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             resBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_resolution), resOpts, i -> { sel[1] = i; resBtn.setText(resOpts[i]); }));
             fpsBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_framerate), fpsOpts, i -> { sel[2] = i; fpsBtn.setText(fpsOpts[i]); }));
             rotBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_rotation), rotOpts, i -> { sel[3] = i; rotBtn.setText(rotOpts[i]); }));
+            camBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_camera), camOpts, i -> { sel[5] = i; camBtn.setText(camOpts[i]); }));
 
             ScrollView scroll = new ScrollView(ctx);
             scroll.addView(form);
@@ -396,6 +485,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                         config.fps = intOf(fpsOpts[sel[2]].toString(), 30);
                         config.bitrateKbps = intOf(bitrate, 2000);
                         config.rotationDegrees = rotationValue(sel[3]);
+                        config.useFrontCamera = sel[5] == 1;
 
                         Prefs.save(pluginContext, serverConfig, config);
                         refreshDestBadge();
@@ -529,7 +619,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     protected void disposeImpl() {
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
-        sensor.dispose();
+        sensor.stop();
     }
 
     @Override public void onDropDownSelectionRemoved() {}

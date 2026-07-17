@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- ICU VideoStreamer operator pane. Status bar (with the Settings gear top-right,
-     UAS-style) over a video preview, with a Broadcast/Flip action bar at the bottom. -->
+<!-- ICU VideoStreamer operator pane — docked HUD: a top status row and a right-edge
+     quick-action column are laid out in the flow (not floating), and the video fills
+     the remaining space between them so nothing overlaps. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#1A1A1A"
-    android:padding="6dp">
+    android:background="#000000">
 
-    <!-- Status strip: live dot · status · badge · settings gear (top-right) -->
+    <!-- Top status HUD (docked row) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="@drawable/bg_statusbar"
-        android:paddingStart="8dp"
+        android:background="@drawable/bg_hud_panel"
+        android:paddingStart="10dp"
         android:paddingEnd="4dp"
         android:paddingTop="4dp"
         android:paddingBottom="4dp">
@@ -33,7 +33,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/icu_text"
             android:textStyle="bold"
             android:text="@string/icu_status_idle" />
 
@@ -42,74 +42,97 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="4dp"
-            android:textColor="#80D8FF"
+            android:textColor="@color/icu_accent"
             android:textSize="12sp"
             android:text="LAN" />
 
         <ImageButton
             android:id="@+id/icu_settings_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="6dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="7dp"
             android:src="@drawable/ic_settings"
-            android:background="?android:attr/selectableItemBackground"
+            android:scaleType="fitCenter"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/icu_settings" />
     </LinearLayout>
 
-    <!-- Video preview -->
-    <FrameLayout
-        android:id="@+id/icu_preview_container"
+    <!-- Body row: video fills remaining space, side panel docked at the right edge -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="6dp"
-        android:layout_marginBottom="6dp"
-        android:background="#000000">
+        android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/icu_preview_hint"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:textColor="#888888"
-            android:text="@string/icu_preview_placeholder" />
-    </FrameLayout>
-
-    <!-- Endpoint URLs (shown while live) -->
-    <TextView
-        android:id="@+id/icu_urls"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textColor="#B0BEC5"
-        android:textSize="12sp"
-        android:fontFamily="monospace"
-        android:maxLines="5"
-        android:visibility="gone" />
-
-    <!-- Action bar -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="6dp">
-
-        <Button
-            android:id="@+id/icu_broadcast_button"
+        <!-- Video preview fills the pane; TextureView is added programmatically at index 0 -->
+        <FrameLayout
+            android:id="@+id/icu_preview_container"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/icu_broadcast" />
+            android:layout_height="match_parent"
+            android:layout_weight="1">
 
-        <ImageButton
-            android:id="@+id/icu_flip_button"
+            <TextView
+                android:id="@+id/icu_preview_hint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:textColor="#888888"
+                android:text="@string/icu_preview_placeholder" />
+
+            <!-- Bottom-left: URL readout (overlays the video corner only) -->
+            <TextView
+                android:id="@+id/icu_urls"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_margin="8dp"
+                android:padding="6dp"
+                android:background="@drawable/bg_hud_panel"
+                android:textColor="@color/icu_text_dim"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:maxLines="5"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- Right edge: vertical quick-action stack (docked column) -->
+        <LinearLayout
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:padding="10dp"
-            android:src="@drawable/ic_flip_camera"
-            android:background="?android:attr/selectableItemBackground"
-            android:contentDescription="@string/icu_flip" />
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_hud_panel"
+            android:padding="6dp">
+
+            <LinearLayout style="@style/IcuQuickItemVertical">
+                <ImageButton
+                    android:id="@+id/icu_broadcast_button"
+                    style="@style/IcuQuickButton"
+                    android:src="@drawable/ic_broadcast"
+                    android:contentDescription="@string/icu_broadcast" />
+                <TextView android:id="@+id/icu_broadcast_label" style="@style/IcuQuickLabel"
+                    android:text="@string/icu_broadcast" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/IcuQuickItemVertical">
+                <ImageButton
+                    android:id="@+id/icu_record_button"
+                    style="@style/IcuQuickButton"
+                    android:src="@drawable/ic_record"
+                    android:contentDescription="@string/icu_record" />
+                <TextView style="@style/IcuQuickLabel" android:text="@string/icu_record" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/IcuQuickItemVertical" android:layout_marginBottom="0dp">
+                <ImageButton
+                    android:id="@+id/icu_snapshot_button"
+                    style="@style/IcuQuickButton"
+                    android:src="@drawable/ic_snapshot"
+                    android:contentDescription="@string/icu_snapshot" />
+                <TextView style="@style/IcuQuickLabel" android:text="@string/icu_snapshot" />
+            </LinearLayout>
+
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>
