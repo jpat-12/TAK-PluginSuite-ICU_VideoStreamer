@@ -19,17 +19,17 @@ public final class Prefs {
     public static void load(Context ctx, MediaServerConfig srv, EncoderConfig enc) {
         SharedPreferences sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE);
 
-        srv.destination = "SERVER".equals(sp.getString("destination", "LAN"))
-                ? MediaServerConfig.Destination.SERVER : MediaServerConfig.Destination.LAN;
+        srv.destination = "LAN".equals(sp.getString("destination", "SERVER"))
+                ? MediaServerConfig.Destination.LAN : MediaServerConfig.Destination.SERVER;
         srv.alias      = sp.getString("alias", "VIDEO_1");
         srv.host       = sp.getString("server_host", "");
         srv.streamPath = sp.getString("stream_path", "icu");
         srv.username   = sp.getString("username", "");
         srv.password   = sp.getString("password", "");
-        srv.serverPort = sp.getInt("server_port", 1935);
+        srv.serverPort = sp.getInt("server_port", 8554);
         try { srv.pushProtocol = MediaServerConfig.PushProtocol.valueOf(
-                sp.getString("push_protocol", "RTMP")); }
-        catch (Exception ignored) { srv.pushProtocol = MediaServerConfig.PushProtocol.RTMP; }
+                sp.getString("push_protocol", "RTSP")); }
+        catch (Exception ignored) { srv.pushProtocol = MediaServerConfig.PushProtocol.RTSP; }
 
         String res = sp.getString("resolution", "P720");
         try { enc.resolution = EncoderConfig.Resolution.valueOf(res); }
@@ -37,7 +37,7 @@ public final class Prefs {
         enc.fps             = sp.getInt("fps", 30);
         enc.bitrateKbps     = sp.getInt("bitrate", 2000);
         enc.useFrontCamera  = sp.getBoolean("front_camera", false);
-        enc.rotationDegrees = sp.getInt("rotation", -1);
+        enc.rotationDegrees = sp.getInt("rotation", 270);
     }
 
     public static void save(Context ctx, MediaServerConfig srv, EncoderConfig enc) {

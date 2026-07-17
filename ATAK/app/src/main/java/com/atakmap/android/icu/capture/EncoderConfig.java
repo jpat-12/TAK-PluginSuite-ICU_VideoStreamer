@@ -27,5 +27,5 @@ public class EncoderConfig {
      * -1 = Auto (derive from sensor + display); otherwise 0/90/180/270.
      * Manual override exists because some devices show inverted video in landscape.
      */
-    public int rotationDegrees = -1;
+    public int rotationDegrees = 270;
 }

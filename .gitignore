@@ -1,2 +1,5 @@
 # ATAK working/build directory
 ATAK-Working/
+
+# Build output archives
+*.zip
