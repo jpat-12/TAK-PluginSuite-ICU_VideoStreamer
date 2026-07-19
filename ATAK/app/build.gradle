@@ -247,6 +247,11 @@ dependencies {
     compileOnly fileTree(dir: 'libs', include: ['main.jar'])
     implementation fileTree(dir: 'libs', include: '*.jar', excludes: ['main.jar'])
 
+    // QR decoding for the settings-page "Scan QR" button (ui/qr/QrScanActivity).
+    // Pure-Java core only — no zxing-android-embedded — the scan UI is our own
+    // Camera2 TextureView, matching how capture/CameraSource already works.
+    implementation 'com.google.zxing:core:3.5.3'
+
     testImplementation 'junit:junit:4.13.2'
 }
 

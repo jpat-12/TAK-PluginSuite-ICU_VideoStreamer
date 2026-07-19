@@ -32,6 +32,11 @@ public class MediaServerConfig {
     public String password   = "";
     public int    serverPort = 8554;      // the port the user publishes to (RTSP default)
 
+    // Captured from a scanned SRT QR's "passphrase" query param (srt://host:port?
+    // streamid=...&passphrase=...). Not yet consumed by SrtTransport (⬜ — needs
+    // native libsrt), but stored so a scan doesn't silently drop it before then.
+    public String srtPassphrase = "";
+
     /** The URL the phone publishes to, per selected protocol. */
     public String pushUrl() {
         switch (pushProtocol) {

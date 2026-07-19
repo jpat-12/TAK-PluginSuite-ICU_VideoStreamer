@@ -14,6 +14,7 @@
 
     <!-- Settings -->
     <string name="icu_settings_title">Broadcast Settings</string>
+    <string name="icu_scan_qr">Scan QR to Fill In Stream URL</string>
     <string name="icu_alias">Broadcast Alias</string>
     <string name="icu_destination">Destination Type</string>
     <string name="icu_protocol">Push Protocol</string>

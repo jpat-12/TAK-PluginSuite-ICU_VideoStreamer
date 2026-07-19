@@ -3,8 +3,10 @@ package com.atakmap.android.icu;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
 import android.os.Handler;
@@ -36,8 +38,10 @@ import com.atakmap.android.icu.serve.StreamEndpoint;
 import com.atakmap.android.icu.serve.TransportManager;
 import com.atakmap.android.icu.share.StreamSensorMarker;
 import com.atakmap.android.icu.ui.StreamStatusWidget;
+import com.atakmap.android.icu.ui.qr.QrScanActivity;
 import com.atakmap.android.icu.util.NetworkUtils;
 import com.atakmap.android.icu.util.Prefs;
+import com.atakmap.android.icu.util.StreamUrlParser;
 import com.atakmap.android.maps.MapView;
 import com.atakmap.coremap.log.Log;
 
@@ -433,6 +437,14 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             sel[3] = rotationIndex(config.rotationDegrees);
             sel[4] = serverConfig.pushProtocol.ordinal();
             sel[5] = config.useFrontCamera ? 1 : 0;
+            // Staged like the rest of the dialog's fields — only committed to
+            // serverConfig on Save, so Cancel correctly discards a scan too.
+            final String[] scannedPassphrase = {serverConfig.srtPassphrase};
+
+            final Button scanQrBtn = new Button(ctx);
+            scanQrBtn.setAllCaps(false);
+            scanQrBtn.setText(ps(R.string.icu_scan_qr));
+            form.addView(scanQrBtn);
 
             final EditText alias = addEdit(ctx, form, ps(R.string.icu_alias),
                     serverConfig.alias, android.text.InputType.TYPE_CLASS_TEXT);
@@ -477,10 +489,50 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             rotBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_rotation), rotOpts, i -> { sel[3] = i; rotBtn.setText(rotOpts[i]); }));
             camBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_camera), camOpts, i -> { sel[5] = i; camBtn.setText(camOpts[i]); }));
 
+            // Scan a Stream URL QR (rtsp://, rtmp://, or srt://…streamid=…) and fill
+            // in destination/protocol/address/port/path — same fields Save reads from.
+            // QrScanActivity runs outside ATAK's classloader (it's a plain Activity),
+            // so the result comes back over a broadcast, not onActivityResult.
+            final BroadcastReceiver qrReceiver = new BroadcastReceiver() {
+                @Override public void onReceive(Context c, Intent intent) {
+                    if (intent.getBooleanExtra(QrScanActivity.EXTRA_CANCELLED, false)) return;
+                    String text = intent.getStringExtra(QrScanActivity.EXTRA_TEXT);
+                    try {
+                        StreamUrlParser.Parsed p = StreamUrlParser.parse(text);
+                        sel[0] = 1; destBtn.setText(destOpts[1]); srv.setVisibility(View.VISIBLE);
+                        sel[4] = p.protocol.ordinal(); protoBtn.setText(protoOpts[sel[4]]);
+                        address.setText(p.host);
+                        port.setText(Integer.toString(p.port));
+                        path.setText(p.path);
+                        String msg = "Filled in from QR: " + p.protocol + " " + p.host + ":" + p.port;
+                        if (p.passphrase != null) {
+                            scannedPassphrase[0] = p.passphrase;
+                            msg += " (passphrase captured)";
+                        }
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
+                    } catch (IllegalArgumentException e) {
+                        Toast.makeText(ctx, "QR isn't a supported stream URL: " + e.getMessage(),
+                                Toast.LENGTH_LONG).show();
+                    }
+                }
+            };
+            atakContext().registerReceiver(qrReceiver, new IntentFilter(QrScanActivity.ACTION_RESULT));
+
+            scanQrBtn.setOnClickListener(x -> {
+                if (!hasCameraPermission()) {
+                    requestCameraPermission();
+                    return;
+                }
+                Intent intent = new Intent();
+                intent.setClassName(pluginContext.getPackageName(), QrScanActivity.class.getName());
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                atakContext().startActivity(intent);
+            });
+
             ScrollView scroll = new ScrollView(ctx);
             scroll.addView(form);
 
-            new AlertDialog.Builder(ctx)
+            AlertDialog dialog = new AlertDialog.Builder(ctx)
                     .setTitle(ps(R.string.icu_settings_title))
                     .setView(scroll)
                     .setPositiveButton(ps(R.string.icu_save), (dlg, w) -> {
@@ -495,6 +547,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                         applyPastedAddress(serverConfig);   // parse scheme/port/path if a full URL was typed
                         serverConfig.username = str(user, "");
                         serverConfig.password = str(pass, "");
+                        serverConfig.srtPassphrase = scannedPassphrase[0];
                         config.resolution = EncoderConfig.Resolution.values()[sel[1]];
                         config.fps = intOf(fpsOpts[sel[2]].toString(), 30);
                         config.bitrateKbps = intOf(bitrate, 2000);
@@ -510,7 +563,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                         }
                     })
                     .setNegativeButton(ps(R.string.icu_cancel), null)
-                    .show();
+                    .create();
+            dialog.setOnDismissListener(dismissed -> {
+                try { atakContext().unregisterReceiver(qrReceiver); } catch (Exception ignored) {}
+            });
+            dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "settings dialog failed", t);
             Toast.makeText(ctx, "Settings error: " + t, Toast.LENGTH_LONG).show();
