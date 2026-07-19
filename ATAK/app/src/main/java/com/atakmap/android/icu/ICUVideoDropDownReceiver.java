@@ -35,6 +35,7 @@ import com.atakmap.android.icu.serve.SrtTransport;
 import com.atakmap.android.icu.serve.StreamEndpoint;
 import com.atakmap.android.icu.serve.TransportManager;
 import com.atakmap.android.icu.share.StreamSensorMarker;
+import com.atakmap.android.icu.ui.StreamStatusWidget;
 import com.atakmap.android.icu.util.NetworkUtils;
 import com.atakmap.android.icu.util.Prefs;
 import com.atakmap.android.maps.MapView;
@@ -65,6 +66,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private final EncoderConfig     config       = new EncoderConfig();
     private final MediaServerConfig serverConfig = new MediaServerConfig();
     private final StreamSensorMarker sensor = new StreamSensorMarker();
+    private final StreamStatusWidget statusWidget;
 
     private TransportManager transports;
 
@@ -81,9 +83,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private TextureView previewView;
     private volatile Surface previewSurface;
 
-    public ICUVideoDropDownReceiver(MapView mapView, Context pluginContext) {
+    public ICUVideoDropDownReceiver(MapView mapView, Context pluginContext,
+            StreamStatusWidget statusWidget) {
         super(mapView);
         this.pluginContext = pluginContext;
+        this.statusWidget = statusWidget;
 
         root = PluginLayoutInflater.inflate(pluginContext, R.layout.main_layout, null);
 
@@ -124,11 +128,18 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
                 previewSurface = new Surface(st);
                 applyPreviewRotation();
+                // Re-attach preview to an already-running capture session (dropdown reopened
+                // while broadcasting continued in the background).
+                pipeline.setPreviewSurface(previewSurface);
             }
             @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) {
                 applyPreviewRotation();
             }
             @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
+                // Drop the preview target *before* the Surface goes away so a running
+                // capture session doesn't keep a repeating request pointed at a dead
+                // Surface (dropdown closing must not interrupt the encoder/transports).
+                pipeline.setPreviewSurface(null);
                 previewSurface = null;
                 return true;
             }
@@ -236,6 +247,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                             ? serverConfig.viewUrl()
                             : NetworkUtils.rtspUrl(8554, "/live");
                     sensor.start(sensorUrl, serverConfig.alias);
+                    statusWidget.setStreaming(true);
                     updateLiveStatus(0);
                 });
             }
@@ -244,6 +256,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                 ui.post(() -> {
                     sensor.stop();
                     if (transports != null) transports.stopAll();
+                    statusWidget.setStreaming(false);
                     resetIdleUi();
                     setStatus("Failed: " + message);
                 });
@@ -258,6 +271,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         sensor.stop();                       // revert self marker to the user's prefs
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
+        statusWidget.setStreaming(false);
         resetIdleUi();
     }
 
@@ -625,7 +639,13 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     @Override public void onDropDownSelectionRemoved() {}
     @Override public void onDropDownVisible(boolean visible) {}
     @Override public void onDropDownSizeChanged(double width, double height) {}
-    @Override public void onDropDownClose() {
-        if (pipeline.isRunning()) stopBroadcast();
-    }
+    /**
+     * Closing the pane must NOT stop an active broadcast — the camera/encoder/transports
+     * keep running in the background (this receiver is retained — see {@code setRetain}
+     * in the constructor — and only torn down in {@code disposeImpl} when the plugin
+     * itself unloads). {@link StreamStatusWidget} is the map-anchored indicator of
+     * whether it's still live. The preview surface is detached separately, via the
+     * TextureView listener, so the dead pane view doesn't break the capture session.
+     */
+    @Override public void onDropDownClose() {}
 }
