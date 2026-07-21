@@ -3,10 +3,8 @@ package com.atakmap.android.icu;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
 import android.os.Handler;
@@ -38,7 +36,7 @@ import com.atakmap.android.icu.serve.StreamEndpoint;
 import com.atakmap.android.icu.serve.TransportManager;
 import com.atakmap.android.icu.share.StreamSensorMarker;
 import com.atakmap.android.icu.ui.StreamStatusWidget;
-import com.atakmap.android.icu.ui.qr.QrScanActivity;
+import com.atakmap.android.icu.ui.qr.QrScanDialog;
 import com.atakmap.android.icu.util.NetworkUtils;
 import com.atakmap.android.icu.util.Prefs;
 import com.atakmap.android.icu.util.StreamUrlParser;
@@ -151,31 +149,12 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         });
     }
 
-    /** Rotate the preview upright (fixes the "inverted in landscape" case). */
+    /** Rotate the preview upright. Manual only — no auto-detect (see the icu_rotation
+     *  string-array and rotationIndex/rotationValue below; there is no "Auto" entry). */
     private void applyPreviewRotation() {
         if (previewView == null) return;
-        previewView.setRotation(effectiveRotation());
+        previewView.setRotation(config.rotationDegrees);
         previewView.setScaleX(config.useFrontCamera ? -1f : 1f);   // mirror front camera
-    }
-
-    private int effectiveRotation() {
-        if (config.rotationDegrees >= 0) return config.rotationDegrees;   // manual override
-        int sensor = pipeline.getCamera().getSensorOrientation();
-        int disp   = displayRotationDegrees();
-        return ((sensor - disp) + 360) % 360;                            // auto
-    }
-
-    private int displayRotationDegrees() {
-        try {
-            int r = ((Activity) atakContext()).getWindowManager()
-                    .getDefaultDisplay().getRotation();
-            switch (r) {
-                case Surface.ROTATION_90:  return 90;
-                case Surface.ROTATION_180: return 180;
-                case Surface.ROTATION_270: return 270;
-                default:                   return 0;
-            }
-        } catch (Exception e) { return 0; }
     }
 
     // ── Broadcast ────────────────────────────────────────────────────────────────
@@ -491,42 +470,49 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
             // Scan a Stream URL QR (rtsp://, rtmp://, or srt://…streamid=…) and fill
             // in destination/protocol/address/port/path — same fields Save reads from.
-            // QrScanActivity runs outside ATAK's classloader (it's a plain Activity),
-            // so the result comes back over a broadcast, not onActivityResult.
-            final BroadcastReceiver qrReceiver = new BroadcastReceiver() {
-                @Override public void onReceive(Context c, Intent intent) {
-                    if (intent.getBooleanExtra(QrScanActivity.EXTRA_CANCELLED, false)) return;
-                    String text = intent.getStringExtra(QrScanActivity.EXTRA_TEXT);
-                    try {
-                        StreamUrlParser.Parsed p = StreamUrlParser.parse(text);
-                        sel[0] = 1; destBtn.setText(destOpts[1]); srv.setVisibility(View.VISIBLE);
-                        sel[4] = p.protocol.ordinal(); protoBtn.setText(protoOpts[sel[4]]);
-                        address.setText(p.host);
-                        port.setText(Integer.toString(p.port));
-                        path.setText(p.path);
-                        String msg = "Filled in from QR: " + p.protocol + " " + p.host + ":" + p.port;
-                        if (p.passphrase != null) {
-                            scannedPassphrase[0] = p.passphrase;
-                            msg += " (passphrase captured)";
-                        }
-                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
-                    } catch (IllegalArgumentException e) {
-                        Toast.makeText(ctx, "QR isn't a supported stream URL: " + e.getMessage(),
-                                Toast.LENGTH_LONG).show();
-                    }
-                }
-            };
-            atakContext().registerReceiver(qrReceiver, new IntentFilter(QrScanActivity.ACTION_RESULT));
-
+            // QrScanDialog is an in-process Dialog (not a separate Activity), so the
+            // result comes back as a direct callback — no broadcast, no manifest entry,
+            // no cross-classloader boundary to cross. Mirrors QuickCapture's QR scanner.
             scanQrBtn.setOnClickListener(x -> {
                 if (!hasCameraPermission()) {
                     requestCameraPermission();
                     return;
                 }
-                Intent intent = new Intent();
-                intent.setClassName(pluginContext.getPackageName(), QrScanActivity.class.getName());
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                atakContext().startActivity(intent);
+                if (pipeline.isRunning()) {
+                    Toast.makeText(ctx, "Stop broadcasting before scanning — the camera is in use.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                // Crash-proof, same as confirm() above — a camera/session failure inside
+                // the dialog must surface as a toast, not take the whole app down.
+                try {
+                    new QrScanDialog(ctx, config.rotationDegrees, text -> {
+                        try {
+                            StreamUrlParser.Parsed p = StreamUrlParser.parse(text);
+                            sel[0] = 1; destBtn.setText(destOpts[1]); srv.setVisibility(View.VISIBLE);
+                            sel[4] = p.protocol.ordinal(); protoBtn.setText(protoOpts[sel[4]]);
+                            address.setText(p.host);
+                            port.setText(Integer.toString(p.port));
+                            path.setText(p.path);
+                            String msg = "Filled in from QR: " + p.protocol + " " + p.host + ":" + p.port;
+                            if (p.passphrase != null) {
+                                scannedPassphrase[0] = p.passphrase;
+                                msg += " (passphrase captured)";
+                            }
+                            if (p.name != null && !p.name.isEmpty()) {
+                                alias.setText(p.name);
+                                msg += " — \"" + p.name + "\"";
+                            }
+                            Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
+                        } catch (IllegalArgumentException e) {
+                            Toast.makeText(ctx, "QR isn't a supported stream URL: " + e.getMessage(),
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    }).show();
+                } catch (Throwable t) {
+                    Log.e(TAG, "QR scan dialog failed", t);
+                    Toast.makeText(ctx, "QR scanner error: " + t, Toast.LENGTH_LONG).show();
+                }
             });
 
             ScrollView scroll = new ScrollView(ctx);
@@ -564,9 +550,6 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     })
                     .setNegativeButton(ps(R.string.icu_cancel), null)
                     .create();
-            dialog.setOnDismissListener(dismissed -> {
-                try { atakContext().unregisterReceiver(qrReceiver); } catch (Exception ignored) {}
-            });
             dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "settings dialog failed", t);
@@ -641,11 +624,15 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         if (fps <= 24) return 1;
         return 2;
     }
+    // Orientation setting order (see icu_rotations in strings.xml): Portrait=0°,
+    // Landscape=270°, Reverse Portrait=180°, Reverse Landscape=90° — anchored on the
+    // device-tested value that Landscape needs a 270° correction, with the other three
+    // derived from the fixed 90°-apart / 180°-reverse relationship between them.
     private static int rotationIndex(int deg) {
-        switch (deg) { case 0: return 1; case 90: return 2; case 180: return 3; case 270: return 4; default: return 0; }
+        switch (deg) { case 270: return 1; case 180: return 2; case 90: return 3; default: return 0; }
     }
     private static int rotationValue(int index) {
-        switch (index) { case 1: return 0; case 2: return 90; case 3: return 180; case 4: return 270; default: return -1; }
+        switch (index) { case 1: return 270; case 2: return 180; case 3: return 90; default: return 0; }
     }
     private static String str(EditText e, String def) {
         String s = e.getText().toString().trim();

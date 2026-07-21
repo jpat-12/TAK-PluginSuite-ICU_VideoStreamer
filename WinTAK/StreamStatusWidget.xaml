@@ -1,0 +1,29 @@
+<Window x:Class="ICUVideoStreamer.StreamStatusWidget"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" ResizeMode="NoResize" ShowActivated="False"
+        SizeToContent="WidthAndHeight" Topmost="False"
+        ToolTip="ICU VideoStreamer — click to open, drag to move">
+
+    <!-- Icon + status-dot badge + pulsing LIVE label, mirroring the ATAK StreamStatusWidget -->
+    <Grid Margin="6" Cursor="Hand">
+        <StackPanel>
+            <Grid Width="44" Height="44" HorizontalAlignment="Center">
+                <Image Source="pack://application:,,,/ICUVideoStreamer;component/assets/ic_launcher.png"/>
+                <!-- Red (idle) / green (streaming) status dot, bottom-right -->
+                <Ellipse x:Name="StatusDot" Width="14" Height="14"
+                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                         Fill="#FFE74C3C" Stroke="White" StrokeThickness="1.5"/>
+            </Grid>
+            <!-- "LIVE" — hidden when idle, pulses while streaming -->
+            <TextBlock x:Name="LiveLabel" Text="LIVE" Visibility="Collapsed"
+                       HorizontalAlignment="Center" Margin="0,2,0,0"
+                       Foreground="#FF2ECC71" FontWeight="Bold" FontSize="11">
+                <TextBlock.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="3" ShadowDepth="0"/>
+                </TextBlock.Effect>
+            </TextBlock>
+        </StackPanel>
+    </Grid>
+</Window>

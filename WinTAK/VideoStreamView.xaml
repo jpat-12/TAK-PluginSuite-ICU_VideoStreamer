@@ -130,7 +130,7 @@
                         Command="{Binding OpenSettingsCommand}" Content="Settings" Width="70"/>
                 <Image DockPanel.Dock="Left" Width="40" Height="40" Margin="0,0,8,0"
                        VerticalAlignment="Center"
-                       Source="pack://application:,,,/ICUVideoStreamer;component/assets/Large.png"/>
+                       Source="pack://application:,,,/ICUVideoStreamer;component/assets/ic_launcher.png"/>
                 <TextBlock DockPanel.Dock="Left" Text="Video Stream"
                            FontSize="14" FontWeight="Bold" Foreground="White"
                            VerticalAlignment="Center" Margin="0,0,12,0"/>
@@ -204,6 +204,19 @@
                     <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,32,0,0"
                             Visibility="{Binding RecBadgeVisibility}">
                         <TextBlock Text="● REC" Foreground="Red" FontWeight="Bold"/>
+                    </Border>
+
+                    <!-- Bottom-left: clickable stream URL readout (click = copy to clipboard) -->
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8"
+                            Background="#CC1A1A1A" CornerRadius="3" Padding="6,3"
+                            Visibility="{Binding StreamUrlLinkVisibility}">
+                        <TextBlock FontFamily="Consolas" FontSize="11" TextWrapping="Wrap"
+                                   MaxWidth="360">
+                            <Hyperlink Command="{Binding CopyStreamUrlCommand}"
+                                       Foreground="#FF4FC3F7" ToolTip="Click to copy the stream URL">
+                                <Run Text="{Binding StreamUrlLink, Mode=OneWay}"/>
+                            </Hyperlink>
+                        </TextBlock>
                     </Border>
                 </Grid>
             </Border>

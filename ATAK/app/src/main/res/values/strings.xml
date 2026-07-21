@@ -26,7 +26,7 @@
     <string name="icu_resolution">Resolution</string>
     <string name="icu_framerate">Frame Rate</string>
     <string name="icu_bitrate">Bitrate (kbps)</string>
-    <string name="icu_rotation">Video Rotation</string>
+    <string name="icu_rotation">Orientation</string>
     <string name="icu_camera">Camera</string>
     <string name="icu_save">Save</string>
     <string name="icu_cancel">Cancel</string>
@@ -60,11 +60,12 @@
         <item>24</item>
         <item>30</item>
     </string-array>
+    <!-- Order matches rotationIndex()/rotationValue() in ICUVideoDropDownReceiver:
+         Portrait=0°, Landscape=270°, Reverse Portrait=180°, Reverse Landscape=90°. -->
     <string-array name="icu_rotations">
-        <item>Auto</item>
-        <item>0°</item>
-        <item>90°</item>
-        <item>180°</item>
-        <item>270°</item>
+        <item>Portrait</item>
+        <item>Landscape</item>
+        <item>Reverse Portrait</item>
+        <item>Reverse Landscape</item>
     </string-array>
 </resources>

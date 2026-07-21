@@ -35,14 +35,6 @@
             </intent-filter>
         </activity>
 
-        <!-- QR scanner launched from the settings dialog's "Scan QR" button. Plugin
-             Activities run outside ATAK's classloader (see QrScanActivity's javadoc),
-             so results come back via ACTION_RESULT broadcast, not onActivityResult. -->
-        <activity android:name="com.atakmap.android.icu.ui.qr.QrScanActivity"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
-            android:exported="true"
-            android:configChanges="orientation|screenSize" />
-
     </application>
 
 </manifest>

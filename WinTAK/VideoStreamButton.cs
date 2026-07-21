@@ -6,8 +6,8 @@ using WinTak.Framework.Tools.Attributes;
 namespace ICUVideoStreamer
 {
     [Button("ICUVideoStreamer_VideoStreamButton", "ICU VideoStreamer",
-        LargeImage = "pack://application:,,,/ICUVideoStreamer;component/assets/Large.png",
-        SmallImage = "pack://application:,,,/ICUVideoStreamer;component/assets/Small.png",
+        LargeImage = "pack://application:,,,/ICUVideoStreamer;component/assets/ic_launcher.png",
+        SmallImage = "pack://application:,,,/ICUVideoStreamer;component/assets/ic_launcher.png",
         Tab        = "Home",
         TabGroup   = "VISTA Tools",
         ToolTip    = "Open the Video Stream plugin")]
