@@ -83,6 +83,22 @@ namespace ICUVideoStreamer
         private string _streamUrlDisplay = "";
         public string StreamUrlDisplay { get => _streamUrlDisplay; private set => SetProperty(ref _streamUrlDisplay, value); }
 
+        // Credential-free public stream URL shown as a clickable link over the preview
+        // (bottom-left). Clicking copies it to the clipboard.
+        private string _streamUrlLink = "";
+        public string StreamUrlLink
+        {
+            get => _streamUrlLink;
+            private set
+            {
+                if (SetProperty(ref _streamUrlLink, value))
+                    OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(StreamUrlLinkVisibility)));
+            }
+        }
+
+        public Visibility StreamUrlLinkVisibility =>
+            string.IsNullOrWhiteSpace(_streamUrlLink) ? Visibility.Collapsed : Visibility.Visible;
+
         public string BuildDateText { get; } =
             "Built " + System.IO.File.GetLastWriteTime(
                 System.Reflection.Assembly.GetExecutingAssembly().Location)
@@ -188,6 +204,7 @@ namespace ICUVideoStreamer
         public DelegateCommand RefreshDevicesCommand       { get; }
         public DelegateCommand ApplyLocationCommand        { get; }
         public DelegateCommand ToggleManualLocationCommand { get; }
+        public DelegateCommand CopyStreamUrlCommand        { get; }
 
         // ── Constructor ──────────────────────────────────────────────────────────
 
@@ -204,6 +221,7 @@ namespace ICUVideoStreamer
             ApplyLocationCommand        = new DelegateCommand(OnApplyLocation);
             ToggleManualLocationCommand = new DelegateCommand(() =>
                 IsManualLocationExpanded = !IsManualLocationExpanded);
+            CopyStreamUrlCommand        = new DelegateCommand(OnCopyStreamUrl);
 
             _settings = AppSettings.Load();
             InitializeServices();
@@ -360,6 +378,7 @@ namespace ICUVideoStreamer
             if (!_streamingService.IsStreaming) return;
 
             IsStreaming         = true;
+            StreamStatusHub.IsStreaming = true; // drive the floating status widget
             StreamDotColor      = Brushes.LimeGreen;
             StatusText          = "Streaming";
             RecBadgeVisibility  = _settings.EnableRecording ? Visibility.Visible : Visibility.Collapsed;
@@ -421,6 +440,7 @@ namespace ICUVideoStreamer
             _klvService?.Stop();
 
             IsStreaming        = false;
+            StreamStatusHub.IsStreaming = false; // drive the floating status widget
             StreamDotColor     = Brushes.Red;
             BitrateText        = "";
             RecBadgeVisibility = Visibility.Collapsed;
@@ -534,6 +554,23 @@ namespace ICUVideoStreamer
         private void RefreshStreamUrlDisplay()
         {
             StreamUrlDisplay = _settings?.DisplayStreamUrl ?? "";
+            StreamUrlLink    = _settings?.PublicStreamUrl ?? "";
+        }
+
+        private void OnCopyStreamUrl()
+        {
+            string url = StreamUrlLink;
+            if (string.IsNullOrWhiteSpace(url)) return;
+            try
+            {
+                Clipboard.SetText(url);
+                StatusText = "Stream URL copied to clipboard";
+            }
+            catch
+            {
+                // Clipboard can transiently fail if another process holds it — non-fatal.
+                StatusText = "Could not copy stream URL";
+            }
         }
     }
 }

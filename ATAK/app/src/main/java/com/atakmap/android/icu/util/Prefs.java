@@ -27,6 +27,7 @@ public final class Prefs {
         srv.username   = sp.getString("username", "");
         srv.password   = sp.getString("password", "");
         srv.serverPort = sp.getInt("server_port", 8554);
+        srv.srtPassphrase = sp.getString("srt_passphrase", "");
         try { srv.pushProtocol = MediaServerConfig.PushProtocol.valueOf(
                 sp.getString("push_protocol", "RTSP")); }
         catch (Exception ignored) { srv.pushProtocol = MediaServerConfig.PushProtocol.RTSP; }
@@ -49,6 +50,7 @@ public final class Prefs {
                 .putString("username", srv.username == null ? "" : srv.username)
                 .putString("password", srv.password == null ? "" : srv.password)
                 .putInt("server_port", srv.serverPort)
+                .putString("srt_passphrase", srv.srtPassphrase == null ? "" : srv.srtPassphrase)
                 .putString("push_protocol", srv.pushProtocol.name())
                 .putString("resolution", enc.resolution.name())
                 .putInt("fps", enc.fps)

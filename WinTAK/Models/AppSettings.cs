@@ -52,6 +52,13 @@ namespace ICUVideoStreamer.Models
         // Identity — UID persisted so it's stable across restarts; callsign comes from WinTAK at runtime
         [DataMember] public string Uid { get; set; } = "";
 
+        // Map-anchored status widget (the floating plugin-icon HUD). Position is stored
+        // as an offset from the WinTAK main window's top-left so it tracks the window.
+        // WidgetPositioned=false means "auto-place at bottom-left" until the user drags it.
+        [DataMember] public bool   WidgetPositioned { get; set; } = false;
+        [DataMember] public double WidgetOffsetX    { get; set; } = 0;
+        [DataMember] public double WidgetOffsetY    { get; set; } = 0;
+
         // FFmpeg — empty means use the bundled binary resolved at runtime
         [DataMember] public string FfmpegPath { get; set; } = "";
 

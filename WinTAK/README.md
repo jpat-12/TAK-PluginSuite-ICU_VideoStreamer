@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Assets/Large.png" width="120" alt="Video Stream Plugin"/>
+  <img src="assets/ic_launcher.png" width="120" alt="ICU VideoStreamer"/>
 </p>
 
 # ICU VideoStreamer — WinTAK Plugin
@@ -9,8 +9,10 @@ Part of the TAK-PluginSuite-ICU_VideoStreamer suite. A WinTAK plugin for live vi
 ## Features
 
 - **FFmpeg-based streaming** — RTMP, RTMPS, RTSP, RTSPS, SRT, UDP
+- **Floating status widget** — a persistent plugin-icon HUD (mirrors the ATAK build) that shows a red/green dot and a pulsing **LIVE** label while streaming. Click it to open the pane; drag to relocate (position is remembered). Created at plugin load, so it's visible whether or not the pane is open.
+- **Clickable stream URL** — the credential-free stream URL is overlaid on the bottom-left of the preview; click it to copy to the clipboard
 - **WinTAK GPS integration** — position updates automatically from WinTAK's location service; no separate GPS setup
-- **CoT video announcement** — sends a `b-i-v` event through WinTAK's existing TAK server connection when streaming starts, using your WinTAK callsign and UID
+- **CoT video + sensor announcement** — sends a `b-i-v` video event and re-broadcasts the sensor (FOV cone) CoT every 10 s through WinTAK's existing TAK server connection, using your WinTAK callsign and UID
 - **Screen share mode** — capture your desktop instead of a camera
 - **Optional recording** — save a local copy while streaming
 - **OpenTAK Server** — register/unregister the stream via REST API
@@ -47,10 +49,12 @@ Callsign, team, role, and TAK server connection are read directly from WinTAK �
 ## Architecture
 
 ```
-VideoStreamModule.cs       MEF entry point
+VideoStreamModule.cs       MEF entry point — also creates the floating status widget at load
 VideoStreamButton.cs       Home ribbon button (VISTA Tools group)
 VideoStreamDockPane.cs     ViewModel — imports ILocationService + ICotMessageSender
 VideoStreamView.xaml       Dock pane UI
+StreamStatusWidget.xaml    Floating plugin-icon HUD (owned overlay window); click=open, drag=move
+StreamStatusHub.cs         One shared streaming flag the pane writes and the widget reads
 SettingsWindow.xaml        4-tab settings dialog
 Services/
   StreamingService.cs      FFmpeg subprocess management

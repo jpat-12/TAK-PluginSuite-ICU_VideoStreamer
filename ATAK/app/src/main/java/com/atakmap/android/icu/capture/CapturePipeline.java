@@ -98,6 +98,15 @@ public class CapturePipeline {
         encoder.stop();
     }
 
+    /**
+     * Attach or detach the local preview target while capture keeps running — used when
+     * the drop-down pane's TextureView is destroyed/recreated (dropdown closed/reopened)
+     * so broadcasting isn't interrupted. No-op if capture isn't running.
+     */
+    public void setPreviewSurface(Surface preview) {
+        if (running) camera.setPreviewSurface(preview);
+    }
+
     /** Forward codec config to the sink once both SPS and PPS are known. */
     private void pushFormat() {
         Sink s = sink;

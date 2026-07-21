@@ -106,6 +106,20 @@ public class CameraSource {
         }
     }
 
+    /**
+     * Swap the preview target on an already-running capture session without touching
+     * the encoder surface — used when the drop-down pane's TextureView is torn down
+     * (dropdown closed) or recreated (dropdown reopened) while broadcasting continues
+     * in the background. {@code preview} may be null to drop the preview target
+     * entirely (encoder-only). A no-op before {@link #start} has completed.
+     */
+    public void setPreviewSurface(Surface preview) {
+        this.previewSurface = preview;
+        if (cameraDevice == null || cameraHandler == null) return;
+        cameraHandler.post(() -> startCaptureSession(cameraDevice,
+                message -> Log.w(TAG, "setPreviewSurface: " + message)));
+    }
+
     public void stop() {
         try { if (captureSession != null) { captureSession.close(); captureSession = null; } }
         catch (Exception ignored) {}
@@ -121,6 +135,12 @@ public class CameraSource {
     // ── Internals ────────────────────────────────────────────────────────────
 
     private void startCaptureSession(CameraDevice camera, Callback cb) {
+        // Reconfiguring (e.g. preview surface swapped) — drop the old session first so
+        // its repeating request doesn't keep referencing a torn-down Surface.
+        if (captureSession != null) {
+            try { captureSession.close(); } catch (Exception ignored) {}
+            captureSession = null;
+        }
         try {
             List<Surface> targets = new ArrayList<>();
             targets.add(encoderSurface);
