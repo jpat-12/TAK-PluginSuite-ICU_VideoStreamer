@@ -125,7 +125,11 @@ public class StreamStatusWidget implements AtakMapView.OnMapViewResizedListener 
         marginXPx      = MARGIN_X_DP * density;
         labelReservePx = LABEL_RESERVE_DP * density;
 
-        prefs = pluginContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        // Persist against the HOST ATAK context: a plugin context's SharedPreferences
+        // are not backed by ATAK's persistent data dir and are lost on restart. Unlike
+        // the resource/icon lookups below (which MUST use the plugin package), a named
+        // prefs file keyed off the host context is collision-free and persistent.
+        prefs = mapView.getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         userPositioned = prefs.getBoolean(KEY_USER_POSITIONED, false);
         customX = prefs.getFloat(KEY_X, 0f);
         customY = prefs.getFloat(KEY_Y, 0f);

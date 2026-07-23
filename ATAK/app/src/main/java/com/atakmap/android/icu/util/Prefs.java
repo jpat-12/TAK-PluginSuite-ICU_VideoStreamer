@@ -8,7 +8,12 @@ import com.atakmap.android.icu.serve.MediaServerConfig;
 
 /**
  * Persistence for ICU broadcast settings (destination, server, credentials, encoding).
- * Stored against the plugin context so it survives ATAK restarts.
+ *
+ * <p>IMPORTANT: pass the <b>host ATAK context</b> ({@code getMapView().getContext()}),
+ * NOT the plugin context. A plugin context's SharedPreferences are not backed by
+ * ATAK's persistent data directory, so they do not survive an ATAK restart — the
+ * values only live in the in-memory cache for the current session. Using the host
+ * context writes to ATAK's own {@code shared_prefs} dir, which persists.</p>
  */
 public final class Prefs {
 
@@ -42,6 +47,9 @@ public final class Prefs {
     }
 
     public static void save(Context ctx, MediaServerConfig srv, EncoderConfig enc) {
+        // commit() (not apply()) so the write is on disk before this call returns —
+        // apply()'s write-behind can otherwise be lost if ATAK is force-stopped/killed
+        // shortly after Save, which is exactly what "restart ATAK" testing does.
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
                 .putString("destination", srv.destination.name())
                 .putString("alias", nz(srv.alias, "VIDEO_1"))
@@ -57,7 +65,7 @@ public final class Prefs {
                 .putInt("bitrate", enc.bitrateKbps)
                 .putBoolean("front_camera", enc.useFrontCamera)
                 .putInt("rotation", enc.rotationDegrees)
-                .apply();
+                .commit();
     }
 
     private static String nz(String v, String def) {
