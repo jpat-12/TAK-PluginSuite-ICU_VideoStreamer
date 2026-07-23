@@ -45,6 +45,7 @@ namespace ICUVideoStreamer.Serve
             new Regex(@"bitrate=\s*([\d.]+)kbits", RegexOptions.Compiled);
 
         private readonly Queue<string> _stderrLines = new Queue<string>(10);
+        private volatile bool _stopRequested; // true when the user asked to stop (vs. an unexpected exit)
 
         public StreamingService(AppSettings settings)
         {
@@ -68,6 +69,7 @@ namespace ICUVideoStreamer.Serve
             }
 
             bool withPreview = previewDispatcher != null;
+            _stopRequested = false;
 
             lock (_stderrLines) _stderrLines.Clear();
             string args = BuildArguments(server, encoder, klvPipeName, withPreview);
@@ -130,6 +132,7 @@ namespace ICUVideoStreamer.Serve
         {
             if (_ffmpeg == null || !IsStreaming) return;
             IsStreaming = false;
+            _stopRequested = true; // suppress the "unexpected exit" status from OnFfmpegExited
 
             try { _preview?.Stop(); } catch { }
             _preview = null;
@@ -299,12 +302,34 @@ namespace ICUVideoStreamer.Serve
             try { _preview?.Stop(); } catch { }
             _preview = null;
 
-            string lastOutput;
-            lock (_stderrLines)
-                lastOutput = _stderrLines.Count > 0 ? string.Join(" | ", _stderrLines) : "no output captured";
+            // Intentional stop: Stop() already reported a clean status — don't clobber it
+            // with an FFmpeg stderr dump.
+            if (_stopRequested)
+            {
+                Stopped?.Invoke();
+                return;
+            }
 
-            StatusChanged?.Invoke("FFmpeg stopped: " + lastOutput);
+            // Unexpected exit (crash / server refused / camera busy): surface a concise reason,
+            // skipping FFmpeg's periodic "frame=… fps=…" stats lines which carry no error info.
+            string reason = LastMeaningfulStderr();
+            StatusChanged?.Invoke(string.IsNullOrEmpty(reason) ? "Stream ended unexpectedly" : "Stream stopped: " + reason);
             Stopped?.Invoke();
+        }
+
+        /// <summary>The most recent stderr line that isn't a periodic progress/stats line.</summary>
+        private string LastMeaningfulStderr()
+        {
+            lock (_stderrLines)
+            {
+                foreach (var line in System.Linq.Enumerable.Reverse(_stderrLines))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    if (line.StartsWith("frame=") || (line.Contains("fps=") && line.Contains("bitrate="))) continue;
+                    return line.Length > 160 ? line.Substring(0, 160) : line;
+                }
+            }
+            return "";
         }
 
         // ── DirectShow device enumeration ──────────────────────────────────────────

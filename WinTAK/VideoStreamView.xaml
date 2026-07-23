@@ -15,6 +15,7 @@
         <SolidColorBrush x:Key="IcuDanger"   Color="#F44336"/>
         <SolidColorBrush x:Key="IcuTextDim"  Color="#B0BEC5"/>
         <SolidColorBrush x:Key="IcuHud"      Color="#B3000000"/>
+        <SolidColorBrush x:Key="IcuChrome"   Color="#FF1C1C1C"/>
         <SolidColorBrush x:Key="IcuButton"   Color="#33FFFFFF"/>
 
         <Style x:Key="LabelStyle" TargetType="TextBlock">
@@ -174,7 +175,7 @@
         </Grid.RowDefinitions>
 
         <!-- ═══ Top status HUD ═══ -->
-        <Border Grid.Row="0" Background="{StaticResource IcuHud}" Padding="10,4">
+        <Border Grid.Row="0" Background="{StaticResource IcuChrome}" Padding="10,4">
             <DockPanel LastChildFill="False">
                 <Ellipse DockPanel.Dock="Left" Width="12" Height="12" Fill="{StaticResource IcuDanger}"
                          VerticalAlignment="Center" Margin="0,0,8,0"
@@ -391,7 +392,7 @@
             </Border>
 
             <!-- Right-edge quick-action column -->
-            <Border Grid.Column="2" Background="{StaticResource IcuHud}" Padding="8,10">
+            <Border Grid.Column="2" Background="{StaticResource IcuChrome}" Padding="8,10">
                 <StackPanel VerticalAlignment="Center">
 
                     <!-- Broadcast / Stop -->
