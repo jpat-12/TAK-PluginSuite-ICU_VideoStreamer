@@ -106,7 +106,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
         setupPreview();
 
-        Prefs.load(pluginContext, serverConfig, config);
+        // Persist against the HOST ATAK context, not the plugin context. A plugin
+        // context's SharedPreferences are not backed by ATAK's persistent data dir,
+        // so they're lost on restart (values only survive in the in-memory cache
+        // during the session). atakContext() == getMapView().getContext().
+        Prefs.load(atakContext(), serverConfig, config);
         refreshDestBadge();
 
         broadcastButton.setOnClickListener(v -> toggleBroadcast());
@@ -540,7 +544,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                         config.rotationDegrees = rotationValue(sel[3]);
                         config.useFrontCamera = sel[5] == 1;
 
-                        Prefs.save(pluginContext, serverConfig, config);
+                        Prefs.save(atakContext(), serverConfig, config);   // host context — see load() note
                         refreshDestBadge();
                         applyPreviewRotation();
                         if (pipeline.isRunning()) {
