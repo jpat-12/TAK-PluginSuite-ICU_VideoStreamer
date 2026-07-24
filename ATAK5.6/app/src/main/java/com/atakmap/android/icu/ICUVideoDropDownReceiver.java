@@ -102,6 +102,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private TextureView previewView;
     private volatile Surface previewSurface;
 
+    // Settings page (pushed overlay) — see showSettingsPage()/hideSettingsPage().
+    private View        settingsPage;
+    private LinearLayout settingsContainer;
+    private Button      settingsSaveBtn;
+
     public ICUVideoDropDownReceiver(MapView mapView, Context pluginContext,
             StreamStatusWidget statusWidget) {
         super(mapView);
@@ -132,10 +137,20 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         statusWidget.setEnabled(config.showStatusWidget);
         sensor.clearStaleFov();   // clear any FOV a prior build left stuck on the self marker
 
+        // Settings page (pushed overlay with its own back button).
+        settingsPage      = root.findViewById(R.id.icu_settings_page);
+        settingsContainer = root.findViewById(R.id.icu_settings_container);
+        settingsSaveBtn   = root.findViewById(R.id.icu_settings_save);
+        root.findViewById(R.id.icu_settings_back).setOnClickListener(v -> hideSettingsPage());
+        root.findViewById(R.id.icu_settings_cancel).setOnClickListener(v -> hideSettingsPage());
+        root.findViewById(R.id.icu_settings_blackout).setOnClickListener(v -> {
+            hideSettingsPage(); showBlackout();
+        });
+
         broadcastButton.setOnClickListener(v -> toggleBroadcast());
         recordButton.setOnClickListener(v -> takeRecord());
         snapshotButton.setOnClickListener(v -> takeSnapshot());
-        settingsButton.setOnClickListener(v -> showSettingsDialog());
+        settingsButton.setOnClickListener(v -> showSettingsPage());
 
         setRetain(true);
     }
@@ -559,15 +574,10 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
      * styles, no spinners — this avoids the whole class of "plugin resource resolved
      * against the wrong context" crashes. Wrapped so any error surfaces as a toast.
      */
-    private void showSettingsDialog() {
+    private void showSettingsPage() {
         final Context ctx = atakContext();
         try {
-            final float d = ctx.getResources().getDisplayMetrics().density;
-            final int pad = (int) (14 * d);
-
-            LinearLayout form = new LinearLayout(ctx);
-            form.setOrientation(LinearLayout.VERTICAL);
-            form.setPadding(pad, pad, pad, pad);
+            settingsContainer.removeAllViews();
 
             final CharSequence[] destOpts = pta(R.array.icu_destinations);
             final CharSequence[] protoOpts= pta(R.array.icu_protocols);
@@ -582,21 +592,16 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             sel[3] = rotationIndex(config.rotationDegrees);
             sel[4] = serverConfig.pushProtocol.ordinal();
             sel[5] = config.useFrontCamera ? 1 : 0;
-            // Staged like the rest of the dialog's fields — only committed to
-            // serverConfig on Save, so Cancel correctly discards a scan too.
+            // Staged like the rest of the fields — only committed to serverConfig on Save.
             final String[] scannedPassphrase = {serverConfig.srtPassphrase};
 
-            final Button scanQrBtn = new Button(ctx);
-            scanQrBtn.setAllCaps(false);
-            scanQrBtn.setText(ps(R.string.icu_scan_qr));
-            form.addView(scanQrBtn);
-
-            final EditText alias = addEdit(ctx, form, ps(R.string.icu_alias),
+            // ── Card: Broadcast ──────────────────────────────────────────────────
+            final LinearLayout broadcastCard = addCard(ctx, "BROADCAST");
+            final Button scanQrBtn = addSecondaryButton(ctx, broadcastCard, ps(R.string.icu_scan_qr));
+            final EditText alias = addEdit(ctx, broadcastCard, ps(R.string.icu_alias),
                     serverConfig.alias, android.text.InputType.TYPE_CLASS_TEXT);
+            final Button destBtn = addPicker(ctx, broadcastCard, ps(R.string.icu_destination), destOpts[sel[0]]);
 
-            final Button destBtn = addPicker(ctx, form, ps(R.string.icu_destination), destOpts[sel[0]]);
-
-            // Server group
             final LinearLayout srv = new LinearLayout(ctx);
             srv.setOrientation(LinearLayout.VERTICAL);
             final Button protoBtn = addPicker(ctx, srv, ps(R.string.icu_protocol), protoOpts[sel[4]]);
@@ -610,15 +615,27 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     serverConfig.username, android.text.InputType.TYPE_CLASS_TEXT);
             final EditText pass = addEdit(ctx, srv, ps(R.string.icu_password),
                     serverConfig.password, android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD | android.text.InputType.TYPE_CLASS_TEXT);
-            form.addView(srv);
+            broadcastCard.addView(srv);
             srv.setVisibility(sel[0] == 1 ? View.VISIBLE : View.GONE);
 
-            final Button resBtn = addPicker(ctx, form, ps(R.string.icu_resolution), resOpts[sel[1]]);
-            final Button fpsBtn = addPicker(ctx, form, ps(R.string.icu_framerate), fpsOpts[sel[2]]);
-            final EditText bitrate = addEdit(ctx, form, ps(R.string.icu_bitrate),
+            // ── Card: Video ──────────────────────────────────────────────────────
+            final LinearLayout videoCard = addCard(ctx, "VIDEO");
+            final Button resBtn = addPicker(ctx, videoCard, ps(R.string.icu_resolution), resOpts[sel[1]]);
+            final Button fpsBtn = addPicker(ctx, videoCard, ps(R.string.icu_framerate), fpsOpts[sel[2]]);
+            final EditText bitrate = addEdit(ctx, videoCard, ps(R.string.icu_bitrate),
                     Integer.toString(config.bitrateKbps), android.text.InputType.TYPE_CLASS_NUMBER);
-            final Button rotBtn = addPicker(ctx, form, ps(R.string.icu_rotation), rotOpts[sel[3]]);
-            final Button camBtn = addPicker(ctx, form, ps(R.string.icu_camera), camOpts[sel[5]]);
+            final Button rotBtn = addPicker(ctx, videoCard, ps(R.string.icu_rotation), rotOpts[sel[3]]);
+            final Button camBtn = addPicker(ctx, videoCard, ps(R.string.icu_camera), camOpts[sel[5]]);
+
+            // ── Card: Display & power ────────────────────────────────────────────
+            final LinearLayout dispCard = addCard(ctx, "DISPLAY & POWER");
+            final CharSequence[] widgetOpts = { "On", "Off" };
+            final int[] widgetSel = { config.showStatusWidget ? 0 : 1 };
+            final Button widgetBtn = addPicker(ctx, dispCard, "Status badge", widgetOpts[widgetSel[0]]);
+            final CharSequence[] screenOpts = { "No — keep screen on", "Yes — allow screen off" };
+            final int[] screenSel = { config.streamWithScreenOff ? 1 : 0 };
+            final Button screenBtn = addPicker(ctx, dispCard, "Keep streaming when screen off",
+                    screenOpts[screenSel[0]]);
 
             destBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_destination), destOpts, i -> {
                 sel[0] = i; destBtn.setText(destOpts[i]);
@@ -626,46 +643,24 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             }));
             protoBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_protocol), protoOpts, i -> {
                 sel[4] = i; protoBtn.setText(protoOpts[i]);
-                // Update the port to the protocol's default (user can still override).
                 port.setText(Integer.toString(MediaServerConfig.PushProtocol.values()[i].defaultPort));
             }));
             resBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_resolution), resOpts, i -> { sel[1] = i; resBtn.setText(resOpts[i]); }));
             fpsBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_framerate), fpsOpts, i -> { sel[2] = i; fpsBtn.setText(fpsOpts[i]); }));
             rotBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_rotation), rotOpts, i -> { sel[3] = i; rotBtn.setText(rotOpts[i]); }));
             camBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_camera), camOpts, i -> { sel[5] = i; camBtn.setText(camOpts[i]); }));
-
-            // Status badge On/Off (persistent on-map broadcast indicator). Default On.
-            final CharSequence[] widgetOpts = { "On", "Off" };
-            final int[] widgetSel = { config.showStatusWidget ? 0 : 1 };
-            final Button widgetBtn = addPicker(ctx, form, "Status badge", widgetOpts[widgetSel[0]]);
             widgetBtn.setOnClickListener(x -> picker(ctx, "Status badge", widgetOpts,
                     i -> { widgetSel[0] = i; widgetBtn.setText(widgetOpts[i]); }));
-
-            // Continue streaming after the screen turns off (best-effort — see wake lock).
-            final CharSequence[] screenOpts = { "No — keep screen on", "Yes — allow screen off" };
-            final int[] screenSel = { config.streamWithScreenOff ? 1 : 0 };
-            final Button screenBtn = addPicker(ctx, form, "Keep streaming when screen off",
-                    screenOpts[screenSel[0]]);
             screenBtn.setOnClickListener(x -> picker(ctx, "Keep streaming when screen off", screenOpts,
                     i -> { screenSel[0] = i; screenBtn.setText(screenOpts[i]); }));
 
-            // Scan a Stream URL QR (rtsp://, rtmp://, or srt://…streamid=…) and fill
-            // in destination/protocol/address/port/path — same fields Save reads from.
-            // QrScanDialog is an in-process Dialog (not a separate Activity), so the
-            // result comes back as a direct callback — no broadcast, no manifest entry,
-            // no cross-classloader boundary to cross. Mirrors QuickCapture's QR scanner.
             scanQrBtn.setOnClickListener(x -> {
-                if (!hasCameraPermission()) {
-                    requestCameraPermission();
-                    return;
-                }
+                if (!hasCameraPermission()) { requestCameraPermission(); return; }
                 if (pipeline.isRunning()) {
                     Toast.makeText(ctx, "Stop broadcasting before scanning — the camera is in use.",
                             Toast.LENGTH_LONG).show();
                     return;
                 }
-                // Crash-proof, same as confirm() above — a camera/session failure inside
-                // the dialog must surface as a toast, not take the whole app down.
                 try {
                     new QrScanDialog(ctx, config.rotationDegrees, text -> {
                         try {
@@ -696,51 +691,57 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                 }
             });
 
-            ScrollView scroll = new ScrollView(ctx);
-            scroll.addView(form);
+            settingsSaveBtn.setOnClickListener(v -> {
+                serverConfig.alias = str(alias, defaultAlias());
+                serverConfig.destination = sel[0] == 1
+                        ? MediaServerConfig.Destination.SERVER : MediaServerConfig.Destination.LAN;
+                serverConfig.pushProtocol = MediaServerConfig.PushProtocol.values()[sel[4]];
+                serverConfig.host = str(address, "");
+                serverConfig.serverPort = intOf(port, serverConfig.pushProtocol.defaultPort);
+                serverConfig.streamPath = str(path, defaultPath());
+                applyPastedAddress(serverConfig);
+                serverConfig.username = str(user, "");
+                serverConfig.password = str(pass, "");
+                serverConfig.srtPassphrase = scannedPassphrase[0];
+                config.resolution = EncoderConfig.Resolution.values()[sel[1]];
+                config.fps = intOf(fpsOpts[sel[2]].toString(), 30);
+                config.bitrateKbps = intOf(bitrate, 2000);
+                config.rotationDegrees = rotationValue(sel[3]);
+                config.useFrontCamera = sel[5] == 1;
+                config.showStatusWidget = widgetSel[0] == 0;
+                config.streamWithScreenOff = screenSel[0] == 1;
 
-            AlertDialog dialog = new AlertDialog.Builder(ctx)
-                    .setTitle(ps(R.string.icu_settings_title))
-                    .setView(scroll)
-                    .setPositiveButton(ps(R.string.icu_save), (dlg, w) -> {
-                        serverConfig.alias = str(alias, defaultAlias());
-                        serverConfig.destination = sel[0] == 1
-                                ? MediaServerConfig.Destination.SERVER : MediaServerConfig.Destination.LAN;
-                        serverConfig.pushProtocol = MediaServerConfig.PushProtocol.values()[sel[4]];
-                        // Defaults from the explicit fields; a pasted URL below can override.
-                        serverConfig.host = str(address, "");
-                        serverConfig.serverPort = intOf(port, serverConfig.pushProtocol.defaultPort);
-                        serverConfig.streamPath = str(path, defaultPath());
-                        applyPastedAddress(serverConfig);   // parse scheme/port/path if a full URL was typed
-                        serverConfig.username = str(user, "");
-                        serverConfig.password = str(pass, "");
-                        serverConfig.srtPassphrase = scannedPassphrase[0];
-                        config.resolution = EncoderConfig.Resolution.values()[sel[1]];
-                        config.fps = intOf(fpsOpts[sel[2]].toString(), 30);
-                        config.bitrateKbps = intOf(bitrate, 2000);
-                        config.rotationDegrees = rotationValue(sel[3]);
-                        config.useFrontCamera = sel[5] == 1;
-                        config.showStatusWidget = widgetSel[0] == 0;
-                        config.streamWithScreenOff = screenSel[0] == 1;
+                Prefs.save(atakContext(), serverConfig, config);
+                statusWidget.setEnabled(config.showStatusWidget);
+                if (pipeline.isRunning()) root.setKeepScreenOn(!config.streamWithScreenOff);
+                refreshDestBadge();
+                applyPreviewRotation();
+                hideSettingsPage();
+                if (pipeline.isRunning()) {
+                    Toast.makeText(ctx, "Restarting with new settings…", Toast.LENGTH_SHORT).show();
+                    stopBroadcast(); startBroadcast();
+                }
+            });
 
-                        Prefs.save(atakContext(), serverConfig, config);   // host context — see load() note
-                        statusWidget.setEnabled(config.showStatusWidget);
-                        if (pipeline.isRunning()) root.setKeepScreenOn(!config.streamWithScreenOff);
-                        refreshDestBadge();
-                        applyPreviewRotation();
-                        if (pipeline.isRunning()) {
-                            Toast.makeText(ctx, "Restarting with new settings…", Toast.LENGTH_SHORT).show();
-                            stopBroadcast(); startBroadcast();
-                        }
-                    })
-                    .setNeutralButton("Blackout", (dlg, w) -> showBlackout())
-                    .setNegativeButton(ps(R.string.icu_cancel), null)
-                    .create();
-            dialog.show();
+            settingsPage.setVisibility(View.VISIBLE);
         } catch (Throwable t) {
-            Log.e(TAG, "settings dialog failed", t);
+            Log.e(TAG, "settings page failed", t);
             Toast.makeText(ctx, "Settings error: " + t, Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void hideSettingsPage() {
+        if (settingsPage != null) settingsPage.setVisibility(View.GONE);
+    }
+
+    /** Close the settings page on back rather than the whole drop-down. */
+    @Override
+    protected boolean onBackButtonPressed() {
+        if (settingsPage != null && settingsPage.getVisibility() == View.VISIBLE) {
+            hideSettingsPage();
+            return true;
+        }
+        return super.onBackButtonPressed();
     }
 
     // ── Programmatic dialog helpers ──────────────────────────────────────────────
@@ -748,11 +749,47 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private String ps(int resId) { return pluginContext.getString(resId); }
     private CharSequence[] pta(int arrayRes) { return pluginContext.getResources().getTextArray(arrayRes); }
 
+    // Plugin resources are resolved against the PLUGIN context — views are built with the
+    // ATAK context (proper theming), but their backgrounds/colors are plugin resources.
+    private int pColor(int resId) { return pluginContext.getResources().getColor(resId); }
+    private android.graphics.drawable.Drawable pDrawable(int resId) {
+        return pluginContext.getResources().getDrawable(resId, pluginContext.getTheme());
+    }
+    private static int dp(Context ctx, float v) {
+        return Math.round(v * ctx.getResources().getDisplayMetrics().density);
+    }
+
+    /** A titled card appended to the settings container; returns its content layout. */
+    private LinearLayout addCard(Context ctx, String title) {
+        LinearLayout card = new LinearLayout(ctx);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(pDrawable(R.drawable.bg_card));
+        int p = dp(ctx, 16);
+        card.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(ctx, 12);
+        card.setLayoutParams(lp);
+
+        TextView header = new TextView(ctx);
+        header.setText(title);
+        header.setTextColor(pColor(R.color.icu_accent));
+        header.setTextSize(12);
+        header.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        header.setLetterSpacing(0.06f);
+        header.setPadding(0, 0, 0, dp(ctx, 6));
+        card.addView(header);
+
+        settingsContainer.addView(card);
+        return card;
+    }
+
     private EditText addEdit(Context ctx, LinearLayout parent, String label, String value, int inputType) {
         parent.addView(makeLabel(ctx, label));
         EditText e = new EditText(ctx);
         e.setInputType(inputType);
         if (value != null) e.setText(value);
+        styleInput(ctx, e);
         parent.addView(e);
         return e;
     }
@@ -762,15 +799,49 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         Button b = new Button(ctx);
         b.setAllCaps(false);
         b.setText(current);
+        styleInput(ctx, b);
+        b.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
         parent.addView(b);
         return b;
+    }
+
+    /** Full-width secondary (outlined) button, e.g. Scan QR. */
+    private Button addSecondaryButton(Context ctx, LinearLayout parent, String label) {
+        Button b = new Button(ctx);
+        b.setAllCaps(false);
+        b.setText(label);
+        b.setBackground(pDrawable(R.drawable.bg_button_secondary));
+        b.setTextColor(pColor(R.color.icu_text_secondary));
+        b.setTextSize(14);
+        b.setMinWidth(0); b.setMinimumWidth(0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(ctx, 44));
+        b.setLayoutParams(lp);
+        parent.addView(b);
+        return b;
+    }
+
+    /** Apply the design-system input look (bg + colors + sizing) to an EditText/Button. */
+    private void styleInput(Context ctx, TextView v) {
+        v.setBackground(pDrawable(R.drawable.bg_input));
+        v.setTextColor(pColor(R.color.icu_text_primary));
+        v.setHintTextColor(pColor(R.color.icu_text_hint));
+        v.setTextSize(14);
+        int px = dp(ctx, 12);
+        v.setPadding(px, 0, px, 0);
+        v.setMinHeight(dp(ctx, 44));
+        if (v instanceof Button) { ((Button) v).setMinWidth(0); ((Button) v).setMinimumWidth(0); }
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(ctx, 44)));
     }
 
     private TextView makeLabel(Context ctx, String text) {
         TextView t = new TextView(ctx);
         t.setText(text);
-        t.setTextColor(0xFFB0BEC5);
-        t.setPadding(0, (int) (8 * ctx.getResources().getDisplayMetrics().density), 0, 0);
+        t.setTextColor(pColor(R.color.icu_text_secondary));
+        t.setTextSize(12);
+        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        t.setPadding(0, dp(ctx, 12), 0, dp(ctx, 4));
         return t;
     }
 
