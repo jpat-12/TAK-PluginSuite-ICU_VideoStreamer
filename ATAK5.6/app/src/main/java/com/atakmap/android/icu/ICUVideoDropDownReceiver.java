@@ -130,6 +130,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         Prefs.load(atakContext(), serverConfig, config);
         refreshDestBadge();
         statusWidget.setEnabled(config.showStatusWidget);
+        sensor.clearStaleFov();   // clear any FOV a prior build left stuck on the self marker
 
         broadcastButton.setOnClickListener(v -> toggleBroadcast());
         recordButton.setOnClickListener(v -> takeRecord());
@@ -296,10 +297,31 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         resetIdleUi();
     }
 
-    /** Ensure a stable feed UUID exists (generate + persist once) for server dedupe. */
+    /** Default broadcast alias — the operator callsign, else VIDEO_1. */
+    private String defaultAlias() {
+        String cs = getMapView().getDeviceCallsign();
+        return (cs != null && !cs.trim().isEmpty()) ? cs.trim() : "VIDEO_1";
+    }
+
+    /** Default stream path — the callsign (path-safe), else icu. Avoids operators
+     *  colliding on the same server path when they clear the field. */
+    private String defaultPath() {
+        String cs = getMapView().getDeviceCallsign();
+        if (cs != null) cs = cs.replaceAll("[^A-Za-z0-9_-]", "");
+        return (cs != null && !cs.isEmpty()) ? cs : "icu";
+    }
+
+    /** Ensure a stable feed id exists (generate + persist once) for server dedupe.
+     *  Prefer a callsign-based id so the Video Feed Manager row is readable, not a UUID. */
     private void ensureFeedUuid() {
-        if (serverConfig.feedUuid == null || serverConfig.feedUuid.trim().isEmpty()) {
-            serverConfig.feedUuid = java.util.UUID.randomUUID().toString();
+        String cs = getMapView().getDeviceCallsign();
+        if (cs != null) cs = cs.replaceAll("[^A-Za-z0-9_-]", "");
+        boolean haveCs = cs != null && !cs.isEmpty();
+        boolean unset  = serverConfig.feedUuid == null || serverConfig.feedUuid.trim().isEmpty();
+        // Migrate an existing bare UUID to the callsign form.
+        boolean isRawUuid = !unset && serverConfig.feedUuid.matches("[0-9a-fA-F-]{36}");
+        if (unset || (isRawUuid && haveCs)) {
+            serverConfig.feedUuid = haveCs ? "ICU-" + cs : java.util.UUID.randomUUID().toString();
             Prefs.save(atakContext(), serverConfig, config);
         }
     }
@@ -681,14 +703,14 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     .setTitle(ps(R.string.icu_settings_title))
                     .setView(scroll)
                     .setPositiveButton(ps(R.string.icu_save), (dlg, w) -> {
-                        serverConfig.alias = str(alias, "VIDEO_1");
+                        serverConfig.alias = str(alias, defaultAlias());
                         serverConfig.destination = sel[0] == 1
                                 ? MediaServerConfig.Destination.SERVER : MediaServerConfig.Destination.LAN;
                         serverConfig.pushProtocol = MediaServerConfig.PushProtocol.values()[sel[4]];
                         // Defaults from the explicit fields; a pasted URL below can override.
                         serverConfig.host = str(address, "");
                         serverConfig.serverPort = intOf(port, serverConfig.pushProtocol.defaultPort);
-                        serverConfig.streamPath = str(path, "icu");
+                        serverConfig.streamPath = str(path, defaultPath());
                         applyPastedAddress(serverConfig);   // parse scheme/port/path if a full URL was typed
                         serverConfig.username = str(user, "");
                         serverConfig.password = str(pass, "");

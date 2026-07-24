@@ -54,8 +54,12 @@ public final class SelfMarkerFov {
 
     public void start(String videoUrl, String alias) {
         this.url = videoUrl;
+        String callsign = callsign();
+        // Prefer the passed alias; else the operator callsign — never a bare UUID.
         if (alias != null && !alias.trim().isEmpty()) this.alias = alias.trim();
-        this.videoUid = "ICU-" + UUID.randomUUID();
+        else if (callsign != null) this.alias = callsign;
+        // Identify the feed by callsign (readable) rather than a random UUID.
+        this.videoUid = "ICU-" + (callsign != null ? callsign : UUID.randomUUID().toString());
         active = true;
         // Aim the wedge where the camera is pointing (compass), not direction of travel.
         MapView mv = MapView.getMapView();
@@ -215,6 +219,12 @@ public final class SelfMarkerFov {
         }
     }
 
+    /** Clear any stale FOV metadata/shape left on the self marker (call at plugin load so
+     *  the wedge isn't stuck "on" when not broadcasting — addFovToMap's metadata persists). */
+    public void clearStaleFov() {
+        removeLocalFov();
+    }
+
     /** Camera pointing direction (compass) when available, else fall back to track heading. */
     private double heading() {
         if (compass != null && compass.hasReading()) return compass.azimuth();
@@ -227,5 +237,18 @@ public final class SelfMarkerFov {
     private static Marker selfMarker() {
         MapView mv = MapView.getMapView();
         return mv != null ? mv.getSelfMarker() : null;
+    }
+
+    /** Operator callsign sanitized to a safe token (letters/digits/-/_), or null. */
+    private static String callsign() {
+        try {
+            MapView mv = MapView.getMapView();
+            String cs = (mv != null) ? mv.getDeviceCallsign() : null;
+            if (cs == null) return null;
+            cs = cs.replaceAll("[^A-Za-z0-9_-]", "");
+            return cs.isEmpty() ? null : cs;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 }
