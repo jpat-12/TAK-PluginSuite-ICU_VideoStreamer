@@ -56,8 +56,13 @@ public final class SelfMarkerFov {
         if (alias != null && !alias.trim().isEmpty()) this.alias = alias.trim();
         this.videoUid = "ICU-" + UUID.randomUUID();
         active = true;
+        // NOTE: we deliberately do NOT render a local wedge. addFovToMap writes sensor
+        // metadata (sensorFov/azimuth/range) onto the self marker, which makes ATAK treat
+        // the skittle as a sensor and corrupts "lock on self" (jumps to a phantom sensor
+        // marker). The FOV still reaches peers via the outbound-CoT detail below, which
+        // never touches the live self marker. Clear any stale metadata a prior build left.
+        removeLocalFov();
         handler.post(outboundTick);
-        handler.post(localTick);
         Log.d(TAG, "self CoT FOV+video on: " + videoUrl);
     }
 
