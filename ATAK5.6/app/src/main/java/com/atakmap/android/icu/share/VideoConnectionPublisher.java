@@ -62,9 +62,14 @@ public final class VideoConnectionPublisher {
                 String xml = VideoXMLHandler.serialize(Collections.singletonList(ce))
                         .replace("<feed>\n", "<feed>\n<active>" + active + "</active>\n");
 
-                TakHttpClient client = TakHttpClient.GetHttpClient(server.getURL(true));
+                // TakHttpClient itself appends the server API port (8443) + "/Marti",
+                // so hand it ONLY the host — passing the full CoT URL (…:8089) yields a
+                // broken "…:8089:8443/Marti/Marti/vcm". Request path is just "vcm".
+                String host = hostOf(server);
+                if (host == null) { Log.w(TAG, "no server host; feed not published"); return; }
+                TakHttpClient client = TakHttpClient.GetHttpClient("https://" + host);
                 try {
-                    HttpPost post = new HttpPost(client.getUrl("Marti/vcm"));
+                    HttpPost post = new HttpPost(client.getUrl("vcm"));
                     post.setHeader("Content-Type", "application/xml");
                     post.setEntity(new StringEntity(xml, "UTF-8"));
                     TakHttpResponse resp = client.execute(post);
@@ -87,5 +92,17 @@ public final class VideoConnectionPublisher {
         if (servers == null || servers.length == 0) return null;
         for (TAKServer s : servers) if (s.isConnected()) return s;
         return servers[0];
+    }
+
+    /** Bare hostname of the server (no scheme/port) — TakHttpClient adds the API port. */
+    private static String hostOf(TAKServer server) {
+        try {
+            String url = server.getURL(true);           // e.g. https://host:8089
+            if (url == null) return null;
+            String host = java.net.URI.create(url).getHost();
+            return (host == null || host.isEmpty()) ? null : host;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 }
