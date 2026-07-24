@@ -96,7 +96,9 @@ public class SelfBroadcastDetailHandler extends CotDetailHandler {
         video.addChild(ce);
         root.addChild(video);
 
-        // <sensor fov=".." azimuth=".." range=".." .../>
+        // <sensor fov=".." azimuth=".." range=".." .../> — added ONLY to this outbound
+        // CoT copy, never to the live self marker's metadata, so peers see the FOV wedge
+        // without us ever mutating (and risking corrupting) the local self marker.
         double az = 0;
         if (item instanceof Marker) {
             double h = ((Marker) item).getTrackHeading();

@@ -34,10 +34,9 @@ import com.atakmap.android.icu.serve.RtspPushTransport;
 import com.atakmap.android.icu.serve.SrtTransport;
 import com.atakmap.android.icu.serve.StreamEndpoint;
 import com.atakmap.android.icu.serve.TransportManager;
-import com.atakmap.android.icu.share.StreamSensorMarker;
+import com.atakmap.android.icu.share.SelfMarkerSensorController;
 import com.atakmap.android.icu.ui.StreamStatusWidget;
 import com.atakmap.android.icu.ui.qr.QrScanDialog;
-import com.atakmap.android.icu.util.NetworkUtils;
 import com.atakmap.android.icu.util.Prefs;
 import com.atakmap.android.icu.util.StreamUrlParser;
 import com.atakmap.android.maps.MapView;
@@ -57,6 +56,13 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
     public static final String TAG  = "ICUVideoDropDown";
     public static final String SHOW = "com.atakmap.android.icu.SHOW_PLUGIN";
+    /** Start/stop the broadcast without opening the panel (e.g. from the self-marker
+     *  radial menu, or `adb shell am broadcast -a com.atakmap.android.icu.TOGGLE_BROADCAST`). */
+    public static final String TOGGLE   = "com.atakmap.android.icu.TOGGLE_BROADCAST";
+    /** Snapshot the current frame — headless (self-marker radial). Needs an active preview. */
+    public static final String SNAPSHOT = "com.atakmap.android.icu.SNAPSHOT";
+    /** Toggle local recording — headless (self-marker radial). */
+    public static final String RECORD   = "com.atakmap.android.icu.RECORD";
 
     private static final int REQ_CAMERA = 4711;
 
@@ -67,7 +73,9 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private final CapturePipeline   pipeline     = new CapturePipeline();
     private final EncoderConfig     config       = new EncoderConfig();
     private final MediaServerConfig serverConfig = new MediaServerConfig();
-    private final StreamSensorMarker sensor = new StreamSensorMarker();
+    // Decorates the operator's OWN self marker (skittle) with an FOV cone + tappable
+    // <__video> while broadcasting — no separate sensor marker on the map. See Part A.
+    private final SelfMarkerSensorController sensor = new SelfMarkerSensorController();
     private final StreamStatusWidget statusWidget;
 
     private TransportManager transports;
@@ -118,6 +126,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         snapshotButton.setOnClickListener(v -> takeSnapshot());
         settingsButton.setOnClickListener(v -> showSettingsDialog());
 
+        sensor.register();   // hook the self-marker PLI decorator into ATAK's CotDetailManager
         setRetain(true);
     }
 
@@ -228,12 +237,10 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     liveDot.setVisibility(View.VISIBLE);
                     previewHint.setVisibility(View.GONE);
                     root.setKeepScreenOn(true);   // don't let the phone sleep while streaming
-                    // Drop a sensor marker carrying the reachable URL (server when pushing,
-                    // else the on-device LAN URL). Deterministic — not gated on connect state.
-                    String sensorUrl = serverConfig.pushEnabled()
-                            ? serverConfig.viewUrl()
-                            : NetworkUtils.rtspUrl(8554, "/live");
-                    sensor.start(sensorUrl, serverConfig.alias);
+                    // Decorate the operator's own self marker with the FOV + a tappable
+                    // live feed, advertised via the reachable transport endpoints. No
+                    // separate sensor marker is dropped on the map.
+                    sensor.start(transports.allEndpoints(), serverConfig.alias);
                     statusWidget.setStreaming(true);
                     updateLiveStatus(0);
                 });
@@ -671,9 +678,19 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (SHOW.equals(intent.getAction())) {
+        final String action = intent.getAction();
+        if (SHOW.equals(action)) {
             showDropDown(root, HALF_WIDTH, FULL_HEIGHT, FULL_WIDTH, HALF_HEIGHT, false, this);
             if (!pipeline.isRunning()) resetIdleUi();
+        } else if (TOGGLE.equals(action)) {
+            // Headless start/stop — the panel need not be open. The inflated root view
+            // (and its buttons) exist from construction, so the UI updates in
+            // start/stopBroadcast are safe even while the pane is closed.
+            toggleBroadcast();
+        } else if (SNAPSHOT.equals(action)) {
+            takeSnapshot();
+        } else if (RECORD.equals(action)) {
+            takeRecord();
         }
     }
 
@@ -681,7 +698,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     protected void disposeImpl() {
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
-        sensor.stop();
+        sensor.dispose();   // stop decorating + unregister the handler
     }
 
     @Override public void onDropDownSelectionRemoved() {}
