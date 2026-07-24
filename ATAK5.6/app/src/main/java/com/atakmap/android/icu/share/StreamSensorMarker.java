@@ -29,8 +29,8 @@ import java.util.UUID;
 public class StreamSensorMarker {
 
     private static final String TAG = "ICU.SensorMarker";
-    private static final int INTERVAL_MS = 5000;
-    private static final int STALE_SEC   = 20;
+    private static final int INTERVAL_MS = 10000;
+    private static final int STALE_SEC   = 30;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -107,6 +107,12 @@ public class StreamSensorMarker {
         contact.setAttribute("callsign", alias);
         detail.addChild(contact);
 
+        // Fully transparent icon so only the FOV wedge shows — the sensor point itself is
+        // hidden, making the FOV appear to come off the operator's skittle (co-located).
+        CotDetail color = new CotDetail("color");
+        color.setAttribute("argb", "0");
+        detail.addChild(color);
+
         detail.addChild(videoDetail());
         detail.addChild(sensorDetail(heading));
 
@@ -150,15 +156,25 @@ public class StreamSensorMarker {
         return video;
     }
 
+    /** Full sensor attribute set — iTAK needs the complete set (elevation, vfov, roll,
+     *  stroke and range-line attributes), not just fov/azimuth/range, to render the FOV. */
     private CotDetail sensorDetail(double heading) {
         CotDetail s = new CotDetail("sensor");
-        s.setAttribute("fov", Long.toString(Math.round(fovDeg)));
-        s.setAttribute("azimuth", Long.toString(Math.round(heading)));
+        s.setAttribute("elevation", "0");
+        s.setAttribute("vfov", "0");
+        s.setAttribute("roll", "0");
         s.setAttribute("range", Long.toString(Math.round(rangeM)));
+        s.setAttribute("azimuth", Long.toString(Math.round(heading)));
+        s.setAttribute("fov", Long.toString(Math.round(fovDeg)));
         s.setAttribute("fovRed", "0.0");
         s.setAttribute("fovGreen", "0.6");
         s.setAttribute("fovBlue", "1.0");
-        s.setAttribute("fovAlpha", "0.3");
+        s.setAttribute("fovAlpha", "0.30196078431372547");
+        s.setAttribute("strokeColor", "-16777216");
+        s.setAttribute("strokeWeight", "0.55");
+        s.setAttribute("rangeLines", "25");
+        s.setAttribute("rangeLineStrokeColor", "-16777216");
+        s.setAttribute("rangeLineStrokeWeight", "1.0");
         s.setAttribute("displayMagneticReference", "0");
         return s;
     }

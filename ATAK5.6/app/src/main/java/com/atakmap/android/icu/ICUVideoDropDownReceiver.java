@@ -74,9 +74,9 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private final CapturePipeline   pipeline     = new CapturePipeline();
     private final EncoderConfig     config       = new EncoderConfig();
     private final MediaServerConfig serverConfig = new MediaServerConfig();
-    // Puts the FOV wedge directly on the operator's own self marker while broadcasting,
-    // so it rides out on the user's own CoT/PLI (no separate sensor marker). Uses ATAK's
-    // shipped addFovToMap only — see SelfMarkerFov.
+    // Injects the FOV + video into the operator's OWN outbound self CoT via
+    // CotMapComponent.addAdditionalDetail — the FOV rides on the skittle's own CoT
+    // (ATAK renders it), no separate marker. See SelfMarkerFov.
     private final SelfMarkerFov sensor = new SelfMarkerFov();
     private final StreamStatusWidget statusWidget;
 
@@ -239,8 +239,10 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     liveDot.setVisibility(View.VISIBLE);
                     previewHint.setVisibility(View.GONE);
                     // Keep the screen awake while streaming unless the user opted to allow
-                    // it to sleep (capture keeps running in the background either way).
+                    // it to sleep; when allowed, hold a partial wake lock so the CPU (and
+                    // thus capture/encode/network) keeps running with the screen off.
                     root.setKeepScreenOn(!config.streamWithScreenOff);
+                    if (config.streamWithScreenOff) acquireWakeLock();
                     // Put the FOV + playable feed on the operator's own self marker →
                     // renders locally and rides out on the user's own PLI (native sensor +
                     // video handlers). Deterministic URL — a push transport may not be up yet.
@@ -254,6 +256,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                 ui.post(() -> {
                     sensor.stop();
                     if (transports != null) transports.stopAll();
+                    releaseWakeLock();
                     statusWidget.setStreaming(false);
                     resetIdleUi();
                     setStatus("Failed: " + message);
@@ -269,8 +272,32 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         sensor.stop();                       // revert self marker to the user's prefs
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
+        releaseWakeLock();
         statusWidget.setStreaming(false);
         resetIdleUi();
+    }
+
+    private android.os.PowerManager.WakeLock wakeLock;
+
+    private void acquireWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) return;
+            android.os.PowerManager pm =
+                    (android.os.PowerManager) atakContext().getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return;
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "ICU:Streaming");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire();
+        } catch (Throwable t) {
+            Log.w(TAG, "wake lock acquire: " + t.getMessage());
+        }
+    }
+
+    private void releaseWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Throwable ignored) {}
+        wakeLock = null;
     }
 
     /**
@@ -515,11 +542,12 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             widgetBtn.setOnClickListener(x -> picker(ctx, "Status badge", widgetOpts,
                     i -> { widgetSel[0] = i; widgetBtn.setText(widgetOpts[i]); }));
 
-            // Allow the screen to sleep while streaming (capture keeps running). Default Keep on.
-            final CharSequence[] screenOpts = { "Keep on", "Allow off" };
+            // Continue streaming after the screen turns off (best-effort — see wake lock).
+            final CharSequence[] screenOpts = { "No — keep screen on", "Yes — allow screen off" };
             final int[] screenSel = { config.streamWithScreenOff ? 1 : 0 };
-            final Button screenBtn = addPicker(ctx, form, "Screen while streaming", screenOpts[screenSel[0]]);
-            screenBtn.setOnClickListener(x -> picker(ctx, "Screen while streaming", screenOpts,
+            final Button screenBtn = addPicker(ctx, form, "Keep streaming when screen off",
+                    screenOpts[screenSel[0]]);
+            screenBtn.setOnClickListener(x -> picker(ctx, "Keep streaming when screen off", screenOpts,
                     i -> { screenSel[0] = i; screenBtn.setText(screenOpts[i]); }));
 
             // Scan a Stream URL QR (rtsp://, rtmp://, or srt://…streamid=…) and fill
@@ -746,6 +774,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
         sensor.stop();
+        releaseWakeLock();
     }
 
     @Override public void onDropDownSelectionRemoved() {}
