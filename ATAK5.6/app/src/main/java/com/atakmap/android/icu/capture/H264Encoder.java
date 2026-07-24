@@ -35,6 +35,8 @@ public class H264Encoder {
     private Surface          inputSurface;
     private Thread           drainThread;
     private volatile boolean running;
+    private java.util.Timer  syncTimer;
+    private long             lastKeyMs;   // for keyframe-cadence logging
 
     /**
      * Configure and start the encoder.
@@ -64,6 +66,7 @@ public class H264Encoder {
             running = true;
 
             startDrainThread(callback);
+            startSyncFrameTimer(config);   // force keyframes even if the encoder ignores the GOP hint
             return inputSurface;
         } catch (IOException | IllegalStateException e) {
             callback.onError("Encoder start: " + e.getMessage());
@@ -74,6 +77,10 @@ public class H264Encoder {
 
     public void stop() {
         running = false;
+        if (syncTimer != null) {
+            try { syncTimer.cancel(); } catch (Exception ignored) {}
+            syncTimer = null;
+        }
         if (drainThread != null) {
             try { drainThread.join(500); } catch (InterruptedException ignored) {}
             drainThread = null;
@@ -90,6 +97,32 @@ public class H264Encoder {
         if (inputSurface != null) {
             try { inputSurface.release(); } catch (Exception ignored) {}
             inputSurface = null;
+        }
+    }
+
+    // ── Keyframe cadence ─────────────────────────────────────────────────────────
+    // Many hardware surface-input encoders ignore KEY_I_FRAME_INTERVAL and emit a
+    // keyframe only every ~30s. Browser/HLS players can only cut segments at keyframes,
+    // so that makes them buffer 30–60s behind live. Requesting a sync frame on a timer
+    // reliably forces the ~1–2s keyframe cadence live streaming needs.
+
+    private void startSyncFrameTimer(EncoderConfig config) {
+        final long periodMs = Math.max(1, config.gopSeconds) * 1000L;
+        syncTimer = new java.util.Timer("ICU-SyncFrame", true);
+        syncTimer.scheduleAtFixedRate(new java.util.TimerTask() {
+            @Override public void run() { requestSyncFrame(); }
+        }, periodMs, periodMs);
+    }
+
+    private void requestSyncFrame() {
+        MediaCodec c = codec;
+        if (c == null || !running) return;
+        try {
+            android.os.Bundle params = new android.os.Bundle();
+            params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+            c.setParameters(params);
+        } catch (Exception e) {
+            Log.w(TAG, "requestSyncFrame: " + e.getMessage());
         }
     }
 
@@ -118,6 +151,12 @@ public class H264Encoder {
                             parseSpsAndPps(data, cb);
                         } else {
                             boolean isKey = (info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
+                            if (isKey) {
+                                long now = android.os.SystemClock.elapsedRealtime();
+                                if (lastKeyMs > 0)
+                                    Log.d(TAG, "keyframe interval: " + (now - lastKeyMs) + " ms");
+                                lastKeyMs = now;
+                            }
                             cb.onNalUnit(data, isKey, info.presentationTimeUs);
                         }
                     }

@@ -627,6 +627,15 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             final Button rotBtn = addPicker(ctx, videoCard, ps(R.string.icu_rotation), rotOpts[sel[3]]);
             final Button camBtn = addPicker(ctx, videoCard, ps(R.string.icu_camera), camOpts[sel[5]]);
 
+            // Keyframe (GOP) interval — short values keep browser/HLS players near live.
+            final CharSequence[] gopOpts = { "1 s (browser-friendly)", "2 s", "4 s" };
+            final int[] gopVals = { 1, 2, 4 };
+            int gi = 1; for (int i = 0; i < gopVals.length; i++) if (gopVals[i] == config.gopSeconds) gi = i;
+            final int[] gopSel = { gi };
+            final Button gopBtn = addPicker(ctx, videoCard, "Keyframe interval", gopOpts[gopSel[0]]);
+            gopBtn.setOnClickListener(x -> picker(ctx, "Keyframe interval", gopOpts,
+                    i -> { gopSel[0] = i; gopBtn.setText(gopOpts[i]); }));
+
             // ── Card: Display & power ────────────────────────────────────────────
             final LinearLayout dispCard = addCard(ctx, "DISPLAY & POWER");
             final CharSequence[] widgetOpts = { "On", "Off" };
@@ -708,6 +717,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                 config.bitrateKbps = intOf(bitrate, 2000);
                 config.rotationDegrees = rotationValue(sel[3]);
                 config.useFrontCamera = sel[5] == 1;
+                config.gopSeconds = gopVals[gopSel[0]];
                 config.showStatusWidget = widgetSel[0] == 0;
                 config.streamWithScreenOff = screenSel[0] == 1;
 
