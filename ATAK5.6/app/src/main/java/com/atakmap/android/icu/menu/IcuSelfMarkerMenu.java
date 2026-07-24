@@ -127,20 +127,24 @@ public final class IcuSelfMarkerMenu implements MapMenuFactory {
         }
     }
 
-    /** Broadcast / Record / Snapshot ring shown when the ICU button is pressed. */
+    /** Broadcast / Record / Snapshot / Blackout ring shown when the ICU button is pressed. */
     private MapMenuWidget buildSubmenu(MapMenuWidget parent) {
         MapMenuWidget sub = new MapMenuWidget();
         sub.setButtonWidth(parent.getButtonWidth());
         // One ring out from the parent so the submenu clears the base radial.
         sub.setInnerRadius(parent.getInnerRadius() + parent.getButtonWidth());
-        addSubButton(sub, R.drawable.ic_broadcast, ICUVideoDropDownReceiver.TOGGLE);
-        addSubButton(sub, R.drawable.ic_record,    ICUVideoDropDownReceiver.RECORD);
-        addSubButton(sub, R.drawable.ic_snapshot,  ICUVideoDropDownReceiver.SNAPSHOT);
+        addSubButton(sub, R.drawable.ic_broadcast,     ICUVideoDropDownReceiver.TOGGLE);
+        addSubButton(sub, textIcon("BLK\nOUT"),        ICUVideoDropDownReceiver.BLACKOUT);
+        addSubButton(sub, R.drawable.ic_record,        ICUVideoDropDownReceiver.RECORD);
+        addSubButton(sub, R.drawable.ic_snapshot,      ICUVideoDropDownReceiver.SNAPSHOT);
         return sub;
     }
 
     private void addSubButton(MapMenuWidget sub, int iconRes, final String action) {
-        WidgetIcon icon = icon(iconRes);
+        addSubButton(sub, icon(iconRes), action);
+    }
+
+    private void addSubButton(MapMenuWidget sub, WidgetIcon icon, final String action) {
         if (icon == null) return;
         MapMenuButtonWidget b = new MapMenuButtonWidget(appContext);
         b.setOrientation(b.getOrientationAngle(), sub.getInnerRadius());
@@ -165,10 +169,13 @@ public final class IcuSelfMarkerMenu implements MapMenuFactory {
         return n > 0 ? total / n : 1f;
     }
 
-    /** Rasterize a (vector) plugin drawable to a PNG in ATAK's cache and wrap it as a WidgetIcon. */
+    /** Rasterize a (vector) plugin drawable to a PNG in ATAK's cache and wrap it as a WidgetIcon.
+     *  Cache is keyed by resource NAME (stable across builds) — numeric ids shift between
+     *  builds and would serve a stale PNG from a different icon. */
     private WidgetIcon icon(int iconRes) {
         try {
-            File png = new File(appContext.getCacheDir(), "icu_radial_" + iconRes + ".png");
+            String name = pluginCtx.getResources().getResourceEntryName(iconRes);
+            File png = new File(appContext.getCacheDir(), "icu_radial_" + name + ".png");
             if (!png.exists()) {
                 Drawable d = pluginCtx.getResources().getDrawable(iconRes, pluginCtx.getTheme());
                 if (d == null) return null;
@@ -176,25 +183,75 @@ public final class IcuSelfMarkerMenu implements MapMenuFactory {
                 Canvas c = new Canvas(bmp);
                 d.setBounds(0, 0, ICON_PX, ICON_PX);
                 d.draw(c);
-                FileOutputStream os = new FileOutputStream(png);
-                bmp.compress(Bitmap.CompressFormat.PNG, 100, os);
-                os.close();
-                bmp.recycle();
+                writePng(bmp, png);
             }
-            MapDataRef ref = MapDataRef.parseUri("file://" + png.getAbsolutePath());
-            if (ref == null) return null;
-
-            return new WidgetIcon.Builder()
-                    .setImageRef(0, ref)
-                    .setImageRef(AbstractButtonWidget.STATE_PRESSED, ref)
-                    .setImageRef(AbstractButtonWidget.STATE_SELECTED, ref)
-                    .setImageRef(AbstractButtonWidget.STATE_DISABLED, ref)
-                    .setAnchor(ICON_PX / 2, ICON_PX / 2)
-                    .setSize(ICON_PX, ICON_PX)
-                    .build();
+            return iconFromPng(png);
         } catch (Throwable t) {
             Log.w(TAG, "icon build failed for res " + iconRes + ": " + t.getMessage());
             return null;
         }
+    }
+
+    /** Render a short (optionally multi-line, split on '\n') text label as a radial-button
+     *  icon — radial buttons must be icons, not text. */
+    private WidgetIcon textIcon(String text) {
+        try {
+            String[] lines = text.split("\n");
+            String key = text.replaceAll("[^A-Za-z0-9]", "_");
+            File png = new File(appContext.getCacheDir(), "icu_radial_txt_" + key + ".png");
+            if (!png.exists()) {
+                Bitmap bmp = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888);
+                Canvas c = new Canvas(bmp);
+                android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                p.setColor(0xFFFFFFFF);
+                p.setFakeBoldText(true);
+                p.setTextAlign(android.graphics.Paint.Align.CENTER);
+
+                // Size so the widest line spans ~92% of the icon width...
+                p.setTextSize(ICON_PX);
+                float maxW = 0;
+                for (String ln : lines) maxW = Math.max(maxW, p.measureText(ln));
+                if (maxW > 0) p.setTextSize(ICON_PX * 0.92f * ICON_PX / maxW);
+                // ...then shrink if the stacked lines don't fit the height.
+                android.graphics.Paint.FontMetrics fm = p.getFontMetrics();
+                float lineH = (fm.descent - fm.ascent) * 0.92f;
+                float totalH = lineH * lines.length;
+                if (totalH > ICON_PX) {
+                    p.setTextSize(p.getTextSize() * ICON_PX / totalH);
+                    fm = p.getFontMetrics();
+                    lineH = (fm.descent - fm.ascent) * 0.92f;
+                    totalH = lineH * lines.length;
+                }
+                float baseline = ICON_PX / 2f - totalH / 2f - fm.ascent;
+                for (int i = 0; i < lines.length; i++)
+                    c.drawText(lines[i], ICON_PX / 2f, baseline + i * lineH, p);
+
+                writePng(bmp, png);
+            }
+            return iconFromPng(png);
+        } catch (Throwable t) {
+            Log.w(TAG, "text icon build failed for '" + text + "': " + t.getMessage());
+            return null;
+        }
+    }
+
+    private static void writePng(Bitmap bmp, File png) throws Exception {
+        FileOutputStream os = new FileOutputStream(png);
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, os);
+        os.close();
+        bmp.recycle();
+    }
+
+    private WidgetIcon iconFromPng(File png) {
+        MapDataRef ref = MapDataRef.parseUri("file://" + png.getAbsolutePath());
+        if (ref == null) return null;
+        return new WidgetIcon.Builder()
+                .setImageRef(0, ref)
+                .setImageRef(AbstractButtonWidget.STATE_PRESSED, ref)
+                .setImageRef(AbstractButtonWidget.STATE_SELECTED, ref)
+                .setImageRef(AbstractButtonWidget.STATE_DISABLED, ref)
+                .setAnchor(ICON_PX / 2, ICON_PX / 2)
+                .setSize(ICON_PX, ICON_PX)
+                .build();
     }
 }
