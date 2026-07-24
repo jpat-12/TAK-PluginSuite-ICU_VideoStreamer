@@ -238,7 +238,9 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     broadcastLabel.setText(R.string.icu_stop);
                     liveDot.setVisibility(View.VISIBLE);
                     previewHint.setVisibility(View.GONE);
-                    root.setKeepScreenOn(true);   // don't let the phone sleep while streaming
+                    // Keep the screen awake while streaming unless the user opted to allow
+                    // it to sleep (capture keeps running in the background either way).
+                    root.setKeepScreenOn(!config.streamWithScreenOff);
                     // Put the FOV + playable feed on the operator's own self marker →
                     // renders locally and rides out on the user's own PLI (native sensor +
                     // video handlers). Deterministic URL — a push transport may not be up yet.
@@ -513,6 +515,13 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             widgetBtn.setOnClickListener(x -> picker(ctx, "Status badge", widgetOpts,
                     i -> { widgetSel[0] = i; widgetBtn.setText(widgetOpts[i]); }));
 
+            // Allow the screen to sleep while streaming (capture keeps running). Default Keep on.
+            final CharSequence[] screenOpts = { "Keep on", "Allow off" };
+            final int[] screenSel = { config.streamWithScreenOff ? 1 : 0 };
+            final Button screenBtn = addPicker(ctx, form, "Screen while streaming", screenOpts[screenSel[0]]);
+            screenBtn.setOnClickListener(x -> picker(ctx, "Screen while streaming", screenOpts,
+                    i -> { screenSel[0] = i; screenBtn.setText(screenOpts[i]); }));
+
             // Scan a Stream URL QR (rtsp://, rtmp://, or srt://…streamid=…) and fill
             // in destination/protocol/address/port/path — same fields Save reads from.
             // QrScanDialog is an in-process Dialog (not a separate Activity), so the
@@ -585,9 +594,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                         config.rotationDegrees = rotationValue(sel[3]);
                         config.useFrontCamera = sel[5] == 1;
                         config.showStatusWidget = widgetSel[0] == 0;
+                        config.streamWithScreenOff = screenSel[0] == 1;
 
                         Prefs.save(atakContext(), serverConfig, config);   // host context — see load() note
                         statusWidget.setEnabled(config.showStatusWidget);
+                        if (pipeline.isRunning()) root.setKeepScreenOn(!config.streamWithScreenOff);
                         refreshDestBadge();
                         applyPreviewRotation();
                         if (pipeline.isRunning()) {

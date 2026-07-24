@@ -36,10 +36,14 @@ public final class SelfMarkerFov {
 
     private static final String KEY_SENSOR = "__icu_sensor";
     private static final String KEY_VIDEO  = "__icu_video";
+    private static final String KEY_DEVICE = "__icu_device";
 
     private static final double FOV_DEG = 60, RANGE_M = 200;
     private static final float[] FOV_RGBA = { 0.0f, 0.6f, 1.0f, 0.3f };
-    private static final long REAPPLY_MS = 3000;
+    /** How often the injected FOV/video detail (azimuth) is refreshed for the outbound CoT. */
+    private static final long OUTBOUND_REFRESH_MS = 10000;
+    /** How often the local wedge is re-drawn (self marker refreshes clear it faster). */
+    private static final long LOCAL_REFRESH_MS = 1000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean active;
@@ -52,18 +56,21 @@ public final class SelfMarkerFov {
         if (alias != null && !alias.trim().isEmpty()) this.alias = alias.trim();
         this.videoUid = "ICU-" + UUID.randomUUID();
         active = true;
-        handler.post(tick);
+        handler.post(outboundTick);
+        handler.post(localTick);
         Log.d(TAG, "self CoT FOV+video on: " + videoUrl);
     }
 
     public void stop() {
         if (!active) return;
         active = false;
-        handler.removeCallbacks(tick);
+        handler.removeCallbacks(outboundTick);
+        handler.removeCallbacks(localTick);
         try {
             CotMapComponent cmc = CotMapComponent.getInstance();
             if (cmc != null) {
                 cmc.removeAdditionalDetail(KEY_SENSOR);
+                cmc.removeAdditionalDetail(KEY_DEVICE);
                 cmc.removeAdditionalDetail(KEY_VIDEO);
             }
         } catch (Throwable t) {
@@ -74,39 +81,66 @@ public final class SelfMarkerFov {
 
     // ── Internals ──────────────────────────────────────────────────────────────
 
-    private final Runnable tick = new Runnable() {
+    /** Refresh the detail attached to the outbound self CoT (azimuth) every 10s. */
+    private final Runnable outboundTick = new Runnable() {
         @Override public void run() {
             if (!active) return;
-            apply();
-            handler.postDelayed(this, REAPPLY_MS);
+            try {
+                double az = heading();
+                CotMapComponent cmc = CotMapComponent.getInstance();
+                if (cmc != null) {
+                    cmc.addAdditionalDetail(KEY_SENSOR, sensorDetail(az));
+                    cmc.addAdditionalDetail(KEY_DEVICE, deviceDetail(az));
+                    cmc.addAdditionalDetail(KEY_VIDEO, videoDetail());
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "outbound refresh: " + t.getMessage());
+            }
+            handler.postDelayed(this, OUTBOUND_REFRESH_MS);
         }
     };
 
-    private void apply() {
-        try {
-            double az = heading();
-            CotMapComponent cmc = CotMapComponent.getInstance();
-            if (cmc != null) {
-                cmc.addAdditionalDetail(KEY_SENSOR, sensorDetail(az));   // → outbound self PLI
-                cmc.addAdditionalDetail(KEY_VIDEO, videoDetail());
-            }
-            renderLocalFov(az);   // so the broadcaster sees the wedge on their own device
-        } catch (Throwable t) {
-            Log.w(TAG, "apply: " + t.getMessage());
+    /** Re-draw the local wedge (purely local, no network) so it survives self-marker refreshes. */
+    private final Runnable localTick = new Runnable() {
+        @Override public void run() {
+            if (!active) return;
+            renderLocalFov(heading());
+            handler.postDelayed(this, LOCAL_REFRESH_MS);
         }
-    }
+    };
 
+    /**
+     * Full sensor detail matching what ATAK's own SensorDetailHandler emits — iTAK's
+     * parser needs the complete attribute set (elevation, vfov, roll, stroke and
+     * range-line attributes), not just fov/azimuth/range, or it ignores the FOV.
+     */
     private CotDetail sensorDetail(double az) {
         CotDetail s = new CotDetail("sensor");
-        s.setAttribute("fov", Long.toString(Math.round(FOV_DEG)));
-        s.setAttribute("azimuth", Long.toString(Math.round(az)));
+        s.setAttribute("elevation", "0");
+        s.setAttribute("vfov", "0");
+        s.setAttribute("roll", "0");
         s.setAttribute("range", Long.toString(Math.round(RANGE_M)));
+        s.setAttribute("azimuth", Long.toString(Math.round(az)));
+        s.setAttribute("fov", Long.toString(Math.round(FOV_DEG)));
         s.setAttribute("fovRed", "0.0");
         s.setAttribute("fovGreen", "0.6");
         s.setAttribute("fovBlue", "1.0");
-        s.setAttribute("fovAlpha", "0.3");
+        s.setAttribute("fovAlpha", "0.30196078431372547");
+        s.setAttribute("strokeColor", "-16777216");
+        s.setAttribute("strokeWeight", "0.55");
+        s.setAttribute("rangeLines", "25");
+        s.setAttribute("rangeLineStrokeColor", "-16777216");
+        s.setAttribute("rangeLineStrokeWeight", "1.0");
         s.setAttribute("displayMagneticReference", "0");
         return s;
+    }
+
+    /** Device pointing element — present on ATAK's own sensor CoT, mirrored for iTAK. */
+    private CotDetail deviceDetail(double az) {
+        CotDetail d = new CotDetail("device");
+        d.setAttribute("azimuth", Double.toString(az));
+        d.setAttribute("pitch", "0.0");
+        return d;
     }
 
     private CotDetail videoDetail() {
@@ -142,9 +176,18 @@ public final class SelfMarkerFov {
 
     private void renderLocalFov(double az) {
         Marker self = selfMarker();
-        if (self != null)
-            SensorDetailHandler.addFovToMap(self, az, FOV_DEG, RANGE_M, FOV_RGBA, false);
+        if (self == null) return;
+        // Last arg = true: the 6-arg overload's boolean is passed straight into ATAK's
+        // internal addFovToMap; false was leaving the wedge created-but-invisible.
+        SensorDetailHandler.addFovToMap(self, az, FOV_DEG, RANGE_M, FOV_RGBA, true);
+        if (!loggedPoint) {
+            loggedPoint = true;
+            com.atakmap.coremap.maps.coords.GeoPoint p = self.getPoint();
+            Log.d(TAG, "local FOV: self point valid=" + (p != null && p.isValid())
+                    + " " + (p != null ? p.getLatitude() + "," + p.getLongitude() : "null"));
+        }
     }
+    private boolean loggedPoint;
 
     private void removeLocalFov() {
         try {

@@ -31,4 +31,10 @@ public class EncoderConfig {
 
     /** Whether the persistent on-map broadcast-status badge is shown. Default on. */
     public boolean showStatusWidget = true;
+
+    /**
+     * Allow the screen to turn off while broadcasting (capture continues in the
+     * background). Default false = keep the screen awake while live.
+     */
+    public boolean streamWithScreenOff = false;
 }
