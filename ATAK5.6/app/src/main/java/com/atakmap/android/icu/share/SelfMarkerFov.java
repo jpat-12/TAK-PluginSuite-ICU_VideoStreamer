@@ -38,10 +38,10 @@ public final class SelfMarkerFov {
     private static final String KEY_VIDEO  = "__icu_video";
     private static final String KEY_DEVICE = "__icu_device";
 
-    private static final double FOV_DEG = 60, RANGE_M = 200;
+    private static final double FOV_DEG = 60, RANGE_M = 15;
     private static final float[] FOV_RGBA = { 0.0f, 0.6f, 1.0f, 0.3f };
     /** How often the injected FOV/video detail (azimuth) is refreshed for the outbound CoT. */
-    private static final long OUTBOUND_REFRESH_MS = 10000;
+    private static final long OUTBOUND_REFRESH_MS = 5000;
     /** How often the local wedge is re-drawn (self marker refreshes clear it faster). */
     private static final long LOCAL_REFRESH_MS = 1000;
 
@@ -50,25 +50,31 @@ public final class SelfMarkerFov {
     private String url;
     private String alias = "ICU VideoStreamer";
     private String videoUid;
+    private com.atakmap.android.icu.util.CompassHeading compass;
 
     public void start(String videoUrl, String alias) {
         this.url = videoUrl;
         if (alias != null && !alias.trim().isEmpty()) this.alias = alias.trim();
         this.videoUid = "ICU-" + UUID.randomUUID();
         active = true;
-        // NOTE: we deliberately do NOT render a local wedge. addFovToMap writes sensor
-        // metadata (sensorFov/azimuth/range) onto the self marker, which makes ATAK treat
-        // the skittle as a sensor and corrupts "lock on self" (jumps to a phantom sensor
-        // marker). The FOV still reaches peers via the outbound-CoT detail below, which
-        // never touches the live self marker. Clear any stale metadata a prior build left.
-        removeLocalFov();
+        // Aim the wedge where the camera is pointing (compass), not direction of travel.
+        MapView mv = MapView.getMapView();
+        if (mv != null) {
+            compass = new com.atakmap.android.icu.util.CompassHeading(mv.getContext());
+            compass.start();
+        }
         handler.post(outboundTick);
+        // Local wedge on the broadcasting device: ATAK's shipped addFovToMap only (no
+        // hand-written metadata). Re-enabled to test whether this alone corrupts
+        // "lock on self" or whether the earlier manual sensorFov writes were the cause.
+        handler.post(localTick);
         Log.d(TAG, "self CoT FOV+video on: " + videoUrl);
     }
 
     public void stop() {
         if (!active) return;
         active = false;
+        if (compass != null) { compass.stop(); compass = null; }
         handler.removeCallbacks(outboundTick);
         handler.removeCallbacks(localTick);
         try {
@@ -209,7 +215,9 @@ public final class SelfMarkerFov {
         }
     }
 
-    private static double heading() {
+    /** Camera pointing direction (compass) when available, else fall back to track heading. */
+    private double heading() {
+        if (compass != null && compass.hasReading()) return compass.azimuth();
         Marker self = selfMarker();
         if (self == null) return 0;
         double h = self.getTrackHeading();
