@@ -11,7 +11,7 @@
 
 buildscript {
 
-    ext.PLUGIN_VERSION = "2.1.1"
+    ext.PLUGIN_VERSION = "2.1.2"
     ext.ATAK_VERSION = '5.6.0'
 
     def takdevVersion = '3.+'
@@ -94,6 +94,10 @@ def supportedFlavors =
 android {
     compileSdk 36
     namespace 'com.atakmap.android.icu.plugin'
+
+    // ATAK's TakHttpClient (used to POST video feeds to the TAK Server's Marti API)
+    // takes org.apache.http request objects, which live in this optional platform lib.
+    useLibrary 'org.apache.http.legacy'
 
     buildFeatures {
         buildConfig = true

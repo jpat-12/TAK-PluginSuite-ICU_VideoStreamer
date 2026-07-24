@@ -80,6 +80,11 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     // CotMapComponent.addAdditionalDetail — the FOV rides on the skittle's own CoT
     // (ATAK renders it), no separate marker. See SelfMarkerFov.
     private final SelfMarkerFov sensor = new SelfMarkerFov();
+
+    // Registers the stream as a feed on the TAK Server's Video Feed Manager (server DB
+    // via /Marti/vcm) when pushing to a server. See VideoConnectionPublisher.
+    private final com.atakmap.android.icu.share.VideoConnectionPublisher videoPublisher =
+            new com.atakmap.android.icu.share.VideoConnectionPublisher();
     private final StreamStatusWidget statusWidget;
 
     private TransportManager transports;
@@ -249,6 +254,13 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     // renders locally and rides out on the user's own PLI (native sensor +
                     // video handlers). Deterministic URL — a push transport may not be up yet.
                     sensor.start(advertisedEndpoint().url, serverConfig.alias);
+                    // Register the stream on the TAK Server's Video Feed Manager (server DB)
+                    // when pushing to a server — makes it discoverable server-side, not just
+                    // via the CoT feed on the self marker.
+                    if (serverConfig.pushEnabled()) {
+                        ensureFeedUuid();
+                        videoPublisher.publish(serverConfig, serverConfig.feedUuid);
+                    }
                     statusWidget.setStreaming(true);
                     updateLiveStatus(0);
                 });
@@ -272,11 +284,24 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
 
     private void stopBroadcast() {
         sensor.stop();                       // revert self marker to the user's prefs
+        // Flip the server feed inactive (can't DELETE it with an EUD cert).
+        if (serverConfig.pushEnabled()
+                && serverConfig.feedUuid != null && !serverConfig.feedUuid.isEmpty()) {
+            videoPublisher.unpublish(serverConfig, serverConfig.feedUuid);
+        }
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
         releaseWakeLock();
         statusWidget.setStreaming(false);
         resetIdleUi();
+    }
+
+    /** Ensure a stable feed UUID exists (generate + persist once) for server dedupe. */
+    private void ensureFeedUuid() {
+        if (serverConfig.feedUuid == null || serverConfig.feedUuid.trim().isEmpty()) {
+            serverConfig.feedUuid = java.util.UUID.randomUUID().toString();
+            Prefs.save(atakContext(), serverConfig, config);
+        }
     }
 
     private android.os.PowerManager.WakeLock wakeLock;

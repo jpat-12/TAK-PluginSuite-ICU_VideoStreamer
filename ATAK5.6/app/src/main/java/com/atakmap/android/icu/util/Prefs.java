@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import com.atakmap.android.icu.capture.EncoderConfig;
 import com.atakmap.android.icu.serve.MediaServerConfig;
+import com.atakmap.android.maps.MapView;
 
 /**
  * Persistence for ICU broadcast settings (destination, server, credentials, encoding).
@@ -24,15 +25,28 @@ public final class Prefs {
     public static void load(Context ctx, MediaServerConfig srv, EncoderConfig enc) {
         SharedPreferences sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE);
 
+        // Default the alias + stream path to the operator's callsign so two operators on
+        // default settings don't collide on the same server path (e.g. both "icu").
+        String callsign = deviceCallsign();
+        String defAlias = (callsign != null) ? callsign : "VIDEO_1";
+        String defPath  = (callsign != null) ? pathSafe(callsign) : "icu";
+
         srv.destination = "LAN".equals(sp.getString("destination", "SERVER"))
                 ? MediaServerConfig.Destination.LAN : MediaServerConfig.Destination.SERVER;
-        srv.alias      = sp.getString("alias", "VIDEO_1");
+        srv.alias      = sp.getString("alias", defAlias);
         srv.host       = sp.getString("server_host", "");
-        srv.streamPath = sp.getString("stream_path", "icu");
+        srv.streamPath = sp.getString("stream_path", defPath);
+        // Migrate the old shared defaults to the callsign so existing testers stop
+        // colliding; custom values are left untouched.
+        if (callsign != null) {
+            if ("VIDEO_1".equals(srv.alias)) srv.alias = defAlias;
+            if ("icu".equals(srv.streamPath)) srv.streamPath = defPath;
+        }
         srv.username   = sp.getString("username", "");
         srv.password   = sp.getString("password", "");
         srv.serverPort = sp.getInt("server_port", 8554);
         srv.srtPassphrase = sp.getString("srt_passphrase", "");
+        srv.feedUuid   = sp.getString("feed_uuid", "");
         try { srv.pushProtocol = MediaServerConfig.PushProtocol.valueOf(
                 sp.getString("push_protocol", "RTSP")); }
         catch (Exception ignored) { srv.pushProtocol = MediaServerConfig.PushProtocol.RTSP; }
@@ -61,6 +75,7 @@ public final class Prefs {
                 .putString("password", srv.password == null ? "" : srv.password)
                 .putInt("server_port", srv.serverPort)
                 .putString("srt_passphrase", srv.srtPassphrase == null ? "" : srv.srtPassphrase)
+                .putString("feed_uuid", srv.feedUuid == null ? "" : srv.feedUuid)
                 .putString("push_protocol", srv.pushProtocol.name())
                 .putString("resolution", enc.resolution.name())
                 .putInt("fps", enc.fps)
@@ -74,5 +89,22 @@ public final class Prefs {
 
     private static String nz(String v, String def) {
         return (v == null || v.trim().isEmpty()) ? def : v.trim();
+    }
+
+    /** The operator's ATAK callsign, or null if unavailable. */
+    private static String deviceCallsign() {
+        try {
+            MapView mv = MapView.getMapView();
+            String cs = (mv != null) ? mv.getDeviceCallsign() : null;
+            return (cs == null || cs.trim().isEmpty()) ? null : cs.trim();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Callsign reduced to a URL/stream-path-safe token (letters, digits, - and _). */
+    private static String pathSafe(String s) {
+        String p = s.replaceAll("[^A-Za-z0-9_-]", "");
+        return p.isEmpty() ? "icu" : p;
     }
 }
