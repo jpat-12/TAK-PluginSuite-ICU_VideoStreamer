@@ -1,20 +1,91 @@
 package com.atakmap.android.icu.share;
 
-/**
- * PHASE 3 — Register the live stream with ATAK's local video framework so it appears
- * in the built-in Video tool (via {@code gov.tak.api.video.ConnectionEntry} +
- * {@code IVideoConnectionManager}).
- *
- * <p>Companion to {@link VideoCotBroadcaster}, which handles network dissemination
- * of the URL over CoT.</p>
- */
-public class VideoConnectionPublisher {
+import com.atakmap.android.cot.CotMapComponent;
+import com.atakmap.android.icu.serve.MediaServerConfig;
+import com.atakmap.android.video.ConnectionEntry;
+import com.atakmap.android.video.manager.VideoXMLHandler;
+import com.atakmap.comms.TAKServer;
+import com.atakmap.comms.http.TakHttpClient;
+import com.atakmap.comms.http.TakHttpResponse;
+import com.atakmap.coremap.log.Log;
 
-    public void publish(String rtspUrl, String alias) {
-        throw new UnsupportedOperationException("VideoConnectionPublisher.publish — Phase 3");
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+
+import java.util.Collections;
+
+/**
+ * Registers the live stream as a <b>feed on the TAK Server's Video Feed Manager</b>
+ * (the {@code /Marti/VideoManager.jsp} list), so operators can find it server-side —
+ * not just via the CoT {@code <__video>} on the self marker.
+ *
+ * <p>That list is backed by the server's video-connection DB and is only populated by
+ * POSTing {@code <videoConnections>} XML to the {@code /Marti/vcm} endpoint (the JSP
+ * reads nothing from CoT). We reuse ATAK's {@link VideoXMLHandler} to serialize the
+ * exact schema the server expects, and {@link TakHttpClient} so the EUD's existing
+ * client cert/truststore authenticates the request.</p>
+ *
+ * <p>The server dedupes by {@code <uid>}: re-POSTing the same uuid updates the row
+ * rather than duplicating it. DELETE requires {@code ROLE_ADMIN} (a field EUD won't
+ * have), so {@link #unpublish} flips the feed inactive via another POST instead.</p>
+ */
+public final class VideoConnectionPublisher {
+
+    private static final String TAG = "ICU.VideoPublisher";
+
+    /** Add or update an active feed for this stream on the connected TAK Server. */
+    public void publish(MediaServerConfig cfg, String uuid) {
+        postFeed(cfg, uuid, true);
     }
 
-    public void unpublish() {
-        // TODO(Phase 3): remove the ConnectionEntry from the manager.
+    /** Flip the server feed inactive (EUD certs can't DELETE the row). */
+    public void unpublish(MediaServerConfig cfg, String uuid) {
+        postFeed(cfg, uuid, false);
+    }
+
+    private void postFeed(final MediaServerConfig cfg, final String uuid, final boolean active) {
+        new Thread(() -> {
+            try {
+                TAKServer server = pickServer();
+                if (server == null) {
+                    Log.w(TAG, "no connected TAK Server; feed not published");
+                    return;
+                }
+
+                ConnectionEntry ce = new ConnectionEntry(
+                        cfg.alias == null || cfg.alias.trim().isEmpty() ? "ICU VideoStreamer" : cfg.alias.trim(),
+                        cfg.viewUrl());          // 2-arg ctor parses address/port/path/protocol
+                ce.setUID(uuid);
+
+                // serialize() emits the server's <videoConnections><feed>… schema but has no
+                // <active> element — inject it so publish/unpublish can toggle the feed.
+                String xml = VideoXMLHandler.serialize(Collections.singletonList(ce))
+                        .replace("<feed>\n", "<feed>\n<active>" + active + "</active>\n");
+
+                TakHttpClient client = TakHttpClient.GetHttpClient(server.getURL(true));
+                try {
+                    HttpPost post = new HttpPost(client.getUrl("Marti/vcm"));
+                    post.setHeader("Content-Type", "application/xml");
+                    post.setEntity(new StringEntity(xml, "UTF-8"));
+                    TakHttpResponse resp = client.execute(post);
+                    Log.d(TAG, "vcm POST (" + (active ? "publish" : "unpublish") + ") → "
+                            + resp.getStatusCode());
+                } finally {
+                    client.shutdown();
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "feed " + (active ? "publish" : "unpublish") + " failed: " + t.getMessage());
+            }
+        }, "ICU-VideoPublish").start();
+    }
+
+    /** First connected server, else the first configured one (still cert-authenticated). */
+    private TAKServer pickServer() {
+        CotMapComponent cmc = CotMapComponent.getInstance();
+        if (cmc == null) return null;
+        TAKServer[] servers = cmc.getServers();
+        if (servers == null || servers.length == 0) return null;
+        for (TAKServer s : servers) if (s.isConnected()) return s;
+        return servers[0];
     }
 }

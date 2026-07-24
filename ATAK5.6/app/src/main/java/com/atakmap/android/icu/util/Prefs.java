@@ -33,6 +33,7 @@ public final class Prefs {
         srv.password   = sp.getString("password", "");
         srv.serverPort = sp.getInt("server_port", 8554);
         srv.srtPassphrase = sp.getString("srt_passphrase", "");
+        srv.feedUuid   = sp.getString("feed_uuid", "");
         try { srv.pushProtocol = MediaServerConfig.PushProtocol.valueOf(
                 sp.getString("push_protocol", "RTSP")); }
         catch (Exception ignored) { srv.pushProtocol = MediaServerConfig.PushProtocol.RTSP; }
@@ -61,6 +62,7 @@ public final class Prefs {
                 .putString("password", srv.password == null ? "" : srv.password)
                 .putInt("server_port", srv.serverPort)
                 .putString("srt_passphrase", srv.srtPassphrase == null ? "" : srv.srtPassphrase)
+                .putString("feed_uuid", srv.feedUuid == null ? "" : srv.feedUuid)
                 .putString("push_protocol", srv.pushProtocol.name())
                 .putString("resolution", enc.resolution.name())
                 .putInt("fps", enc.fps)

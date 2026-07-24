@@ -95,6 +95,10 @@ android {
     compileSdk 36
     namespace 'com.atakmap.android.icu.plugin'
 
+    // ATAK's TakHttpClient (used to POST video feeds to the TAK Server's Marti API)
+    // takes org.apache.http request objects, which live in this optional platform lib.
+    useLibrary 'org.apache.http.legacy'
+
     buildFeatures {
         buildConfig = true
     }
