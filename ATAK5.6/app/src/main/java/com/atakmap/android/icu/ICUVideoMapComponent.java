@@ -41,6 +41,8 @@ public class ICUVideoMapComponent extends AbstractWidgetMapComponent {
                 "Capture a snapshot of the current frame");
         filter.addAction(ICUVideoDropDownReceiver.RECORD,
                 "Toggle local recording");
+        filter.addAction(ICUVideoDropDownReceiver.BLACKOUT,
+                "Black out the screen while streaming continues");
         registerReceiver(context, dropDown, filter);
 
         // Add the ICU button (→ Broadcast/Record/Snapshot submenu) to the self-marker

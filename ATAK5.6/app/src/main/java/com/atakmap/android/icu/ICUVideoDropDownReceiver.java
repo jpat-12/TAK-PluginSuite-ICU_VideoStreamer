@@ -64,6 +64,8 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     public static final String SNAPSHOT = "com.atakmap.android.icu.SNAPSHOT";
     /** Toggle local recording — headless (self-marker radial). */
     public static final String RECORD   = "com.atakmap.android.icu.RECORD";
+    /** Black out the screen while keeping it on (so capture keeps running). Tap to wake. */
+    public static final String BLACKOUT = "com.atakmap.android.icu.BLACKOUT";
 
     private static final int REQ_CAMERA = 4711;
 
@@ -298,6 +300,56 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         } catch (Throwable ignored) {}
         wakeLock = null;
+    }
+
+    // ── Blackout (fake screen-off that keeps capture alive) ──────────────────────
+    // A true screen-off backgrounds ATAK and Android cuts the camera after ~5s. Instead
+    // we keep the screen ON but paint it fully black at minimum brightness: the app stays
+    // foreground so capture continues, and on OLED a black screen draws almost no power.
+
+    private View blackoutView;
+    private float savedBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+
+    private void showBlackout() {
+        try {
+            final Activity a = (Activity) atakContext();
+            if (blackoutView != null) return;
+
+            final View v = new View(a);
+            v.setBackgroundColor(0xFF000000);
+            v.setKeepScreenOn(true);           // keep the screen on → camera stays alive
+            v.setClickable(true);
+            v.setFocusable(true);
+            v.setOnClickListener(x -> dismissBlackout());
+            a.addContentView(v, new android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+            blackoutView = v;
+
+            android.view.WindowManager.LayoutParams lp = a.getWindow().getAttributes();
+            savedBrightness = lp.screenBrightness;
+            lp.screenBrightness = 0.0f;        // minimum backlight (near-black)
+            a.getWindow().setAttributes(lp);
+
+            Toast.makeText(a, "Screen blacked out — streaming continues. Tap to wake.",
+                    Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Log.w(TAG, "blackout: " + t.getMessage());
+        }
+    }
+
+    private void dismissBlackout() {
+        try {
+            final Activity a = (Activity) atakContext();
+            android.view.WindowManager.LayoutParams lp = a.getWindow().getAttributes();
+            lp.screenBrightness = savedBrightness;   // restore prior brightness
+            a.getWindow().setAttributes(lp);
+            if (blackoutView != null && blackoutView.getParent() instanceof android.view.ViewGroup)
+                ((android.view.ViewGroup) blackoutView.getParent()).removeView(blackoutView);
+            blackoutView = null;
+        } catch (Throwable t) {
+            Log.w(TAG, "blackout dismiss: " + t.getMessage());
+        }
     }
 
     /**
@@ -634,6 +686,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                             stopBroadcast(); startBroadcast();
                         }
                     })
+                    .setNeutralButton("Blackout", (dlg, w) -> showBlackout())
                     .setNegativeButton(ps(R.string.icu_cancel), null)
                     .create();
             dialog.show();
@@ -766,6 +819,8 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             takeSnapshot();
         } else if (RECORD.equals(action)) {
             takeRecord();
+        } else if (BLACKOUT.equals(action)) {
+            showBlackout();
         }
     }
 
@@ -775,6 +830,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         if (transports != null) { transports.stopAll(); transports = null; }
         sensor.stop();
         releaseWakeLock();
+        dismissBlackout();
     }
 
     @Override public void onDropDownSelectionRemoved() {}
