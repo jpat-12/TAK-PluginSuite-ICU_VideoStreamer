@@ -117,4 +117,13 @@ public class CapturePipeline {
     public byte[] getPps() { return pps; }
 
     public CameraSource getCamera() { return camera; }
+
+    /**
+     * Capture a single JPEG still from the live camera — works with the preview attached
+     * or not (snapshot from the radial with the panel closed). No-op error if not running.
+     */
+    public void captureStill(int jpegOrientation, CameraSource.StillCallback cb) {
+        if (!running) { cb.onStillError("not broadcasting"); return; }
+        camera.captureStill(jpegOrientation, cb);
+    }
 }

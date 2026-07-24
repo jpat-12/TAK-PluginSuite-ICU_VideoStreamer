@@ -37,6 +37,13 @@ public class MediaServerConfig {
     // native libsrt), but stored so a scan doesn't silently drop it before then.
     public String srtPassphrase = "";
 
+    /**
+     * Stable UUID for this device's TAK Server video feed. Persisted so each broadcast
+     * updates the same Video Feed Manager row instead of creating duplicates. Generated
+     * on first publish (see {@code ICUVideoDropDownReceiver}).
+     */
+    public String feedUuid = "";
+
     /** The URL the phone publishes to, per selected protocol. */
     public String pushUrl() {
         switch (pushProtocol) {

@@ -7,6 +7,7 @@ import com.atakmap.android.maps.Marker;
 import com.atakmap.comms.CommsMapComponent.ImportResult;
 import com.atakmap.coremap.cot.event.CotDetail;
 import com.atakmap.coremap.cot.event.CotEvent;
+import com.atakmap.coremap.log.Log;
 
 /**
  * PHASE 3 — while broadcasting, decorates the operator's <b>self marker</b> outgoing
@@ -25,6 +26,8 @@ import com.atakmap.coremap.cot.event.CotEvent;
  * gating below is what limits us to the self PLI while live.</p>
  */
 public class SelfBroadcastDetailHandler extends CotDetailHandler {
+
+    private static final String TAG = "ICU.SelfBroadcast";
 
     /** Values match ATAK's SensorDetailHandler / VideoDetailHandler attribute keys. */
     private static final String SENSOR = "sensor";
@@ -76,6 +79,9 @@ public class SelfBroadcastDetailHandler extends CotDetailHandler {
         MapView mv = MapView.getMapView();
         if (mv == null || item != mv.getSelfMarker()) return false;
 
+        Log.d(TAG, "emitting <sensor>+<__video> on self PLI (uid=" + event.getUID()
+                + " type=" + event.getType() + ")");
+
         // <__video url="..."><ConnectionEntry .../></__video>
         CotDetail video = new CotDetail(VIDEO);
         video.setAttribute("uid", uid == null ? "" : uid);
@@ -96,7 +102,9 @@ public class SelfBroadcastDetailHandler extends CotDetailHandler {
         video.addChild(ce);
         root.addChild(video);
 
-        // <sensor fov=".." azimuth=".." range=".." .../>
+        // <sensor fov=".." azimuth=".." range=".." .../> — added ONLY to this outbound
+        // CoT copy, never to the live self marker's metadata, so peers see the FOV wedge
+        // without us ever mutating (and risking corrupting) the local self marker.
         double az = 0;
         if (item instanceof Marker) {
             double h = ((Marker) item).getTrackHeading();

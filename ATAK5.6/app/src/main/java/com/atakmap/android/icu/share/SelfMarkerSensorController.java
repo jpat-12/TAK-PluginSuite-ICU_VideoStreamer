@@ -24,6 +24,7 @@ public class SelfMarkerSensorController {
     private final SelfBroadcastDetailHandler handler = new SelfBroadcastDetailHandler();
     private boolean registered;
     private String videoUid;
+    private String alias = "ICU VideoStreamer";
 
     public void register() {
         if (registered) return;
@@ -45,11 +46,21 @@ public class SelfMarkerSensorController {
      * endpoint (what ATAK viewers open natively).
      */
     public void start(List<StreamEndpoint> endpoints) {
+        start(endpoints, null);
+    }
+
+    /**
+     * Begin decorating the self PLI with the given stream, advertising it under
+     * {@code alias} (the video ConnectionEntry alias peers see). A null/blank alias
+     * keeps the default.
+     */
+    public void start(List<StreamEndpoint> endpoints, String alias) {
         StreamEndpoint ep = pickPrimary(endpoints);
         if (ep == null) {
             Log.w(TAG, "no endpoint to advertise; sensor not started");
             return;
         }
+        if (alias != null && !alias.trim().isEmpty()) this.alias = alias.trim();
         videoUid = "ICU-" + UUID.randomUUID();
         applyEndpoint(ep);
         handler.setBroadcasting(true);
@@ -84,6 +95,6 @@ public class SelfMarkerSensorController {
         } catch (Exception e) {
             Log.w(TAG, "url parse: " + e.getMessage());
         }
-        handler.setVideo(ep.url, videoUid, "ICU VideoStreamer", address, port, path, proto);
+        handler.setVideo(ep.url, videoUid, alias, address, port, path, proto);
     }
 }

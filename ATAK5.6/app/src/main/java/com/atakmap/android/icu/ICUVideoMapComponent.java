@@ -3,6 +3,7 @@ package com.atakmap.android.icu;
 import android.content.Context;
 import android.content.Intent;
 
+import com.atakmap.android.icu.menu.IcuSelfMarkerMenu;
 import com.atakmap.android.icu.ui.StreamStatusWidget;
 import com.atakmap.android.ipc.AtakBroadcast;
 import com.atakmap.android.maps.MapView;
@@ -22,6 +23,7 @@ public class ICUVideoMapComponent extends AbstractWidgetMapComponent {
 
     private ICUVideoDropDownReceiver dropDown;
     private StreamStatusWidget statusWidget;
+    private IcuSelfMarkerMenu radialMenu;
 
     @Override
     protected void onCreateWidgets(Context context, Intent intent, MapView mapView) {
@@ -33,11 +35,28 @@ public class ICUVideoMapComponent extends AbstractWidgetMapComponent {
                 new AtakBroadcast.DocumentedIntentFilter();
         filter.addAction(ICUVideoDropDownReceiver.SHOW,
                 "Show the ICU VideoStreamer panel");
+        filter.addAction(ICUVideoDropDownReceiver.TOGGLE,
+                "Start/stop the ICU broadcast without opening the panel");
+        filter.addAction(ICUVideoDropDownReceiver.SNAPSHOT,
+                "Capture a snapshot of the current frame");
+        filter.addAction(ICUVideoDropDownReceiver.RECORD,
+                "Toggle local recording");
+        filter.addAction(ICUVideoDropDownReceiver.BLACKOUT,
+                "Black out the screen while streaming continues");
         registerReceiver(context, dropDown, filter);
+
+        // Add the ICU button (→ Broadcast/Record/Snapshot submenu) to the self-marker
+        // radial. Mirrors FeatureLink: a MapMenuFactory that rebuilds + augments the menu.
+        radialMenu = new IcuSelfMarkerMenu(mapView, context);
+        radialMenu.register();
     }
 
     @Override
     protected void onDestroyWidgets(Context context, MapView mapView) {
+        if (radialMenu != null) {
+            radialMenu.dispose();
+            radialMenu = null;
+        }
         if (dropDown != null) {
             unregisterReceiver(context, dropDown);
             dropDown.dispose();
