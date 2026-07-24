@@ -24,6 +24,7 @@ import android.widget.Toast;
 import com.atak.plugins.impl.PluginLayoutInflater;
 import com.atakmap.android.dropdown.DropDown.OnStateListener;
 import com.atakmap.android.dropdown.DropDownReceiver;
+import com.atakmap.android.icu.capture.CameraSource;
 import com.atakmap.android.icu.capture.CapturePipeline;
 import com.atakmap.android.icu.capture.EncoderConfig;
 import com.atakmap.android.icu.plugin.R;
@@ -34,7 +35,7 @@ import com.atakmap.android.icu.serve.RtspPushTransport;
 import com.atakmap.android.icu.serve.SrtTransport;
 import com.atakmap.android.icu.serve.StreamEndpoint;
 import com.atakmap.android.icu.serve.TransportManager;
-import com.atakmap.android.icu.share.SelfMarkerSensorController;
+import com.atakmap.android.icu.share.SelfMarkerFov;
 import com.atakmap.android.icu.ui.StreamStatusWidget;
 import com.atakmap.android.icu.ui.qr.QrScanDialog;
 import com.atakmap.android.icu.util.Prefs;
@@ -73,9 +74,10 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     private final CapturePipeline   pipeline     = new CapturePipeline();
     private final EncoderConfig     config       = new EncoderConfig();
     private final MediaServerConfig serverConfig = new MediaServerConfig();
-    // Decorates the operator's OWN self marker (skittle) with an FOV cone + tappable
-    // <__video> while broadcasting — no separate sensor marker on the map. See Part A.
-    private final SelfMarkerSensorController sensor = new SelfMarkerSensorController();
+    // Puts the FOV wedge directly on the operator's own self marker while broadcasting,
+    // so it rides out on the user's own CoT/PLI (no separate sensor marker). Uses ATAK's
+    // shipped addFovToMap only — see SelfMarkerFov.
+    private final SelfMarkerFov sensor = new SelfMarkerFov();
     private final StreamStatusWidget statusWidget;
 
     private TransportManager transports;
@@ -120,13 +122,13 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         // during the session). atakContext() == getMapView().getContext().
         Prefs.load(atakContext(), serverConfig, config);
         refreshDestBadge();
+        statusWidget.setEnabled(config.showStatusWidget);
 
         broadcastButton.setOnClickListener(v -> toggleBroadcast());
         recordButton.setOnClickListener(v -> takeRecord());
         snapshotButton.setOnClickListener(v -> takeSnapshot());
         settingsButton.setOnClickListener(v -> showSettingsDialog());
 
-        sensor.register();   // hook the self-marker PLI decorator into ATAK's CotDetailManager
         setRetain(true);
     }
 
@@ -237,10 +239,10 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                     liveDot.setVisibility(View.VISIBLE);
                     previewHint.setVisibility(View.GONE);
                     root.setKeepScreenOn(true);   // don't let the phone sleep while streaming
-                    // Decorate the operator's own self marker with the FOV + a tappable
-                    // live feed, advertised via the reachable transport endpoints. No
-                    // separate sensor marker is dropped on the map.
-                    sensor.start(transports.allEndpoints(), serverConfig.alias);
+                    // Put the FOV + playable feed on the operator's own self marker →
+                    // renders locally and rides out on the user's own PLI (native sensor +
+                    // video handlers). Deterministic URL — a push transport may not be up yet.
+                    sensor.start(advertisedEndpoint().url, serverConfig.alias);
                     statusWidget.setStreaming(true);
                     updateLiveStatus(0);
                 });
@@ -269,28 +271,53 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
         resetIdleUi();
     }
 
-    /** Capture the current preview frame to a PNG in the plugin's external files dir. */
+    /**
+     * The URL peers should open, derived deterministically from the current config
+     * (server view URL when pushing, else the on-device LAN RTSP URL). Independent of
+     * whether a push transport has finished connecting yet.
+     */
+    private StreamEndpoint advertisedEndpoint() {
+        if (serverConfig.pushEnabled()) {
+            return new StreamEndpoint(serverConfig.protocolName(), serverConfig.viewUrl());
+        }
+        return new StreamEndpoint("RTSP",
+                com.atakmap.android.icu.util.NetworkUtils.rtspUrl(
+                        com.atakmap.android.icu.serve.RtspServer.PORT,
+                        com.atakmap.android.icu.serve.RtspServer.STREAM_PATH));
+    }
+
+    /**
+     * Capture a JPEG still from the live camera and drop a marker with it attached.
+     * Uses the camera's dedicated still target (not the on-screen preview), so it works
+     * with the plugin panel closed — e.g. triggered from the self-marker radial.
+     */
     private void takeSnapshot() {
         if (!pipeline.isRunning()) {
             Toast.makeText(atakContext(), "Start broadcasting first.", Toast.LENGTH_SHORT).show();
             return;
         }
-        android.graphics.Bitmap bmp = previewView.getBitmap();
-        if (bmp == null) {
-            Toast.makeText(atakContext(), "No frame to capture yet.", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        pipeline.captureStill(config.rotationDegrees, new CameraSource.StillCallback() {
+            @Override public void onStill(byte[] jpeg) {
+                ui.post(() -> saveSnapshotJpeg(jpeg));
+            }
+            @Override public void onStillError(String message) {
+                ui.post(() -> Toast.makeText(atakContext(),
+                        "Snapshot failed: " + message, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    /** Persist the captured JPEG and drop a marker with it attached (UI thread). */
+    private void saveSnapshotJpeg(byte[] jpeg) {
         try {
-            // Keep a local copy on the device (plugin external files dir).
             java.io.File dir = new java.io.File(atakContext().getExternalFilesDir(null), "ICU/snapshots");
             dir.mkdirs();
-            String name = "ICU_" + System.currentTimeMillis() + ".png";
+            String name = "ICU_" + System.currentTimeMillis() + ".jpg";
             java.io.File f = new java.io.File(dir, name);
             java.io.FileOutputStream os = new java.io.FileOutputStream(f);
-            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, os);
+            os.write(jpeg);
             os.close();
             Log.d(TAG, "snapshot → " + f.getAbsolutePath());
-            // Drop a map marker at the current position with this image attached.
             boolean marked = dropSnapshotMarker(f, name);
             Toast.makeText(atakContext(),
                     marked ? "Snapshot saved + marker dropped" : "Snapshot saved: " + name,
@@ -479,6 +506,13 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
             rotBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_rotation), rotOpts, i -> { sel[3] = i; rotBtn.setText(rotOpts[i]); }));
             camBtn.setOnClickListener(x -> picker(ctx, ps(R.string.icu_camera), camOpts, i -> { sel[5] = i; camBtn.setText(camOpts[i]); }));
 
+            // Status badge On/Off (persistent on-map broadcast indicator). Default On.
+            final CharSequence[] widgetOpts = { "On", "Off" };
+            final int[] widgetSel = { config.showStatusWidget ? 0 : 1 };
+            final Button widgetBtn = addPicker(ctx, form, "Status badge", widgetOpts[widgetSel[0]]);
+            widgetBtn.setOnClickListener(x -> picker(ctx, "Status badge", widgetOpts,
+                    i -> { widgetSel[0] = i; widgetBtn.setText(widgetOpts[i]); }));
+
             // Scan a Stream URL QR (rtsp://, rtmp://, or srt://…streamid=…) and fill
             // in destination/protocol/address/port/path — same fields Save reads from.
             // QrScanDialog is an in-process Dialog (not a separate Activity), so the
@@ -550,8 +584,10 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
                         config.bitrateKbps = intOf(bitrate, 2000);
                         config.rotationDegrees = rotationValue(sel[3]);
                         config.useFrontCamera = sel[5] == 1;
+                        config.showStatusWidget = widgetSel[0] == 0;
 
                         Prefs.save(atakContext(), serverConfig, config);   // host context — see load() note
+                        statusWidget.setEnabled(config.showStatusWidget);
                         refreshDestBadge();
                         applyPreviewRotation();
                         if (pipeline.isRunning()) {
@@ -698,7 +734,7 @@ public class ICUVideoDropDownReceiver extends DropDownReceiver
     protected void disposeImpl() {
         pipeline.stop();
         if (transports != null) { transports.stopAll(); transports = null; }
-        sensor.dispose();   // stop decorating + unregister the handler
+        sensor.stop();
     }
 
     @Override public void onDropDownSelectionRemoved() {}

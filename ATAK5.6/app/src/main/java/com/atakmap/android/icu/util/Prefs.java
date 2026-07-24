@@ -44,6 +44,7 @@ public final class Prefs {
         enc.bitrateKbps     = sp.getInt("bitrate", 2000);
         enc.useFrontCamera  = sp.getBoolean("front_camera", false);
         enc.rotationDegrees = sp.getInt("rotation", 270);
+        enc.showStatusWidget = sp.getBoolean("show_status_widget", true);
     }
 
     public static void save(Context ctx, MediaServerConfig srv, EncoderConfig enc) {
@@ -65,6 +66,7 @@ public final class Prefs {
                 .putInt("bitrate", enc.bitrateKbps)
                 .putBoolean("front_camera", enc.useFrontCamera)
                 .putInt("rotation", enc.rotationDegrees)
+                .putBoolean("show_status_widget", enc.showStatusWidget)
                 .commit();
     }
 

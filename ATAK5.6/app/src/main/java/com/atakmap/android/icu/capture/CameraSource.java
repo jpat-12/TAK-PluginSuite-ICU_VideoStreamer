@@ -1,12 +1,15 @@
 package com.atakmap.android.icu.capture;
 
 import android.content.Context;
+import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Range;
@@ -15,6 +18,7 @@ import android.view.Surface;
 
 import com.atakmap.coremap.log.Log;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Semaphore;
@@ -38,6 +42,12 @@ public class CameraSource {
         void onError(String message);
     }
 
+    /** Result of a still capture (JPEG bytes), delivered off the camera thread. */
+    public interface StillCallback {
+        void onStill(byte[] jpeg);
+        void onStillError(String message);
+    }
+
     private CameraDevice         cameraDevice;
     private CameraCaptureSession captureSession;
     private HandlerThread        cameraThread;
@@ -46,6 +56,8 @@ public class CameraSource {
 
     private Surface encoderSurface;
     private Surface previewSurface;
+    private ImageReader stillReader;                 // always-on JPEG target for snapshots
+    private volatile StillCallback pendingStill;     // callback for the in-flight capture
     private int     fps = 30;
     private volatile int sensorOrientation = 0;
     private volatile boolean frontFacing = false;
@@ -69,6 +81,27 @@ public class CameraSource {
         cameraThread  = new HandlerThread("ICU-CameraThread");
         cameraThread.start();
         cameraHandler = new Handler(cameraThread.getLooper());
+
+        // Always-on JPEG target so snapshots work even when the on-screen preview
+        // (drop-down pane) is closed. A dedicated still target, not the preview.
+        stillReader = ImageReader.newInstance(
+                config.resolution.w, config.resolution.h, ImageFormat.JPEG, 2);
+        stillReader.setOnImageAvailableListener(reader -> {
+            Image img = reader.acquireLatestImage();
+            if (img == null) return;
+            StillCallback stillCb = pendingStill;
+            pendingStill = null;
+            try {
+                ByteBuffer buf = img.getPlanes()[0].getBuffer();
+                byte[] bytes = new byte[buf.remaining()];
+                buf.get(bytes);
+                if (stillCb != null) stillCb.onStill(bytes);
+            } catch (Exception e) {
+                if (stillCb != null) stillCb.onStillError("read still: " + e.getMessage());
+            } finally {
+                img.close();
+            }
+        }, cameraHandler);
 
         CameraManager manager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
         try {
@@ -125,11 +158,43 @@ public class CameraSource {
         catch (Exception ignored) {}
         try { if (cameraDevice != null) { cameraDevice.close(); cameraDevice = null; } }
         catch (Exception ignored) {}
+        try { if (stillReader != null) { stillReader.close(); stillReader = null; } }
+        catch (Exception ignored) {}
+        pendingStill = null;
         if (cameraThread != null) {
             cameraThread.quitSafely();
             cameraThread = null;
             cameraHandler = null;
         }
+    }
+
+    /**
+     * Capture a single JPEG still from the live camera session — works whether or not a
+     * preview is attached (so snapshots succeed with the plugin panel closed). Delivered
+     * on the camera thread via {@code cb}.
+     *
+     * @param jpegOrientation EXIF orientation degrees (0/90/180/270) to bake into the JPEG.
+     */
+    public void captureStill(int jpegOrientation, StillCallback cb) {
+        final CameraCaptureSession session = captureSession;
+        final CameraDevice camera = cameraDevice;
+        if (session == null || camera == null || stillReader == null || cameraHandler == null) {
+            cb.onStillError("camera not running");
+            return;
+        }
+        pendingStill = cb;
+        cameraHandler.post(() -> {
+            try {
+                CaptureRequest.Builder req =
+                        camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                req.addTarget(stillReader.getSurface());
+                req.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation);
+                session.capture(req.build(), null, cameraHandler);
+            } catch (Exception e) {
+                pendingStill = null;
+                cb.onStillError("captureStill: " + e.getMessage());
+            }
+        });
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
@@ -145,6 +210,7 @@ public class CameraSource {
             List<Surface> targets = new ArrayList<>();
             targets.add(encoderSurface);
             if (previewSurface != null) targets.add(previewSurface);
+            if (stillReader != null) targets.add(stillReader.getSurface());  // snapshot target
 
             camera.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(CameraCaptureSession session) {

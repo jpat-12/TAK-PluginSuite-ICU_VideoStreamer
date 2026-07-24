@@ -43,9 +43,9 @@ public class ICUVideoMapComponent extends AbstractWidgetMapComponent {
                 "Toggle local recording");
         registerReceiver(context, dropDown, filter);
 
-        // Add the ICU submenu (Broadcast/Record/Snapshot) to the self-marker radial.
-        // Uses the host ATAK context to build the radial widgets.
-        radialMenu = new IcuSelfMarkerMenu(mapView.getContext(), context);
+        // Add the ICU button (→ Broadcast/Record/Snapshot submenu) to the self-marker
+        // radial. Mirrors FeatureLink: a MapMenuFactory that rebuilds + augments the menu.
+        radialMenu = new IcuSelfMarkerMenu(mapView, context);
         radialMenu.register();
     }
 

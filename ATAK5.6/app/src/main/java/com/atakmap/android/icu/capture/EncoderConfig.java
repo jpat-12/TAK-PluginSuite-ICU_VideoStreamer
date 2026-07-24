@@ -28,4 +28,7 @@ public class EncoderConfig {
      * Manual override exists because some devices show inverted video in landscape.
      */
     public int rotationDegrees = 270;
+
+    /** Whether the persistent on-map broadcast-status badge is shown. Default on. */
+    public boolean showStatusWidget = true;
 }

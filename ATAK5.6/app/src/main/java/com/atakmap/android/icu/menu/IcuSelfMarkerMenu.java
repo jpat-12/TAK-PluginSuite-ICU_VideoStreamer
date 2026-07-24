@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
-import android.util.Base64;
 
 import com.atakmap.android.icu.ICUVideoDropDownReceiver;
 import com.atakmap.android.icu.plugin.R;
@@ -13,128 +12,178 @@ import com.atakmap.android.ipc.AtakBroadcast;
 import com.atakmap.android.maps.MapDataRef;
 import com.atakmap.android.maps.MapItem;
 import com.atakmap.android.maps.MapView;
+import com.atakmap.android.maps.assets.MapAssets;
 import com.atakmap.android.menu.MapMenuButtonWidget;
-import com.atakmap.android.menu.MapMenuHandler;
+import com.atakmap.android.menu.MapMenuFactory;
 import com.atakmap.android.menu.MapMenuReceiver;
 import com.atakmap.android.menu.MapMenuWidget;
+import com.atakmap.android.menu.MenuMapAdapter;
+import com.atakmap.android.menu.MenuResourceFactory;
 import com.atakmap.android.widgets.AbstractButtonWidget;
 import com.atakmap.android.widgets.WidgetIcon;
 import com.atakmap.coremap.log.Log;
 
-import java.io.ByteArrayOutputStream;
+import gov.tak.api.widgets.IMapMenuButtonWidget;
+import gov.tak.api.widgets.IMapWidget;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 
 /**
- * Part B2 — adds a dedicated <b>ICU</b> entry to the operator's own self-marker radial
- * menu, opening a submenu of Broadcast / Record / Snapshot. Each button fires the
- * matching headless intent handled by {@link ICUVideoDropDownReceiver} (so the map
- * radial drives the same actions as the panel, panel open or not).
+ * Part B2 — adds a dedicated <b>ICU</b> button to the operator's own self-marker radial
+ * menu; pressing it opens a submenu of Broadcast / Record / Snapshot, each firing the
+ * matching headless intent handled by {@link ICUVideoDropDownReceiver}.
  *
- * <p>Registered as a {@link MapMenuHandler} (not a {@code MapMenuFactory}) on purpose:
- * {@link #updateMenu} is handed the <i>already-built</i> menu, so we <b>append</b> our
- * button and never clobber ATAK's default self-marker options.</p>
- *
- * <p>Radial buttons are icon-based — the GL renderer dereferences the button's
- * {@link WidgetIcon}, so a button with no icon crashes ATAK. Our drawables are vectors,
- * which {@code android.resource://} can't decode as a bitmap, so we rasterize each one
- * and embed it as a {@code base64://} ref (no filesystem — the plugin cache dir isn't
- * writable anyway).</p>
+ * <p>Implemented as a {@link MapMenuFactory} (mirroring the FeatureLink plugin): we
+ * rebuild the item's default menu via {@link MenuResourceFactory} and append our button,
+ * so ATAK lays the whole ring out in one pass and our button sits <i>in</i> the radial
+ * (not floating over it). The button geometry — {@code setOrientation} /
+ * {@code setButtonSize} / {@code setLayoutWeight} — matches the sibling buttons, per the
+ * SDK radialmenudemo pattern.</p>
  */
-public final class IcuSelfMarkerMenu implements MapMenuHandler {
+public final class IcuSelfMarkerMenu implements MapMenuFactory {
 
     private static final String TAG = "ICU.RadialMenu";
-    private static final int ICON_PX = 48;   // rasterized radial icon size
+    private static final int ICON_PX = 32;
 
-    /** ATAK context used to construct the radial widgets. */
-    private final Context ctx;
-    /** Plugin context — resolves the plugin's own drawable resources. */
-    private final Context pluginCtx;
+    private final MapView mapView;
+    private final Context appContext;   // ATAK context (widgets + writable cache)
+    private final Context pluginCtx;    // plugin context (drawable resources)
+    private final MenuResourceFactory resourceFactory;
     private boolean registered;
 
-    public IcuSelfMarkerMenu(Context ctx, Context pluginCtx) {
-        this.ctx = ctx;
+    public IcuSelfMarkerMenu(MapView mapView, Context pluginCtx) {
+        this.mapView = mapView;
         this.pluginCtx = pluginCtx;
+        this.appContext = mapView.getContext();
+
+        MapAssets mapAssets = new MapAssets(appContext);
+        MenuMapAdapter adapter = new MenuMapAdapter();
+        try {
+            adapter.loadMenuFilters(mapAssets, "filters/menu_filters.xml");
+        } catch (IOException e) {
+            Log.w(TAG, "menu filters default: " + e.getMessage());
+        }
+        resourceFactory = new MenuResourceFactory(
+                mapView, mapView.getMapData(), mapAssets, adapter);
     }
 
     public void register() {
         MapMenuReceiver r = MapMenuReceiver.getInstance();
         if (r != null && !registered) {
-            r.registerMapMenuHandler(this);
+            r.registerMapMenuFactory(this);
             registered = true;
-            Log.d(TAG, "ICU self-marker radial handler registered");
+            Log.d(TAG, "ICU self-marker radial factory registered");
+        } else {
+            Log.w(TAG, "radial factory NOT registered (receiver=" + r + ")");
         }
     }
 
     public void dispose() {
         MapMenuReceiver r = MapMenuReceiver.getInstance();
         if (r != null && registered) {
-            r.unregisterMapMenuHandler(this);
+            r.unregisterMapMenuFactory(this);
             registered = false;
         }
     }
 
     @Override
-    public void updateMenu(MapItem item, MapMenuWidget menu) {
-        MapView mv = MapView.getMapView();
-        if (mv == null || menu == null || item == null || item != mv.getSelfMarker())
-            return;
+    public MapMenuWidget create(MapItem item) {
+        // Only our own skittle.
+        if (item == null || mapView.getSelfMarker() != item) return null;
 
-        MapMenuButtonWidget icu = button(R.drawable.ic_icu_menu, null);
-        if (icu == null) return;   // couldn't build the icon → skip rather than crash
+        MapMenuWidget menu = resourceFactory.create(item);
+        if (menu == null) return null;
 
-        MapMenuWidget sub = new MapMenuWidget();
-        addButton(sub, R.drawable.ic_broadcast, ICUVideoDropDownReceiver.TOGGLE);
-        addButton(sub, R.drawable.ic_record,    ICUVideoDropDownReceiver.RECORD);
-        addButton(sub, R.drawable.ic_snapshot,  ICUVideoDropDownReceiver.SNAPSHOT);
-        icu.setSubmenu(sub);
-
-        menu.addWidget(icu);   // append, keeping ATAK's default self-marker buttons
-    }
-
-    private void addButton(MapMenuWidget parent, int iconRes, String action) {
-        MapMenuButtonWidget b = button(iconRes, action);
-        if (b != null) parent.addWidget(b);
-    }
-
-    /**
-     * Build a radial button with a rasterized icon. A non-null {@code action} broadcasts
-     * that intent on click (handled by {@link ICUVideoDropDownReceiver}); a null action
-     * is a parent that only opens its submenu. Returns null if the icon can't be built
-     * (a radial button without an icon would crash the GL renderer).
-     */
-    private MapMenuButtonWidget button(int iconRes, final String action) {
-        WidgetIcon icon = icon(iconRes);
-        if (icon == null) return null;
-        MapMenuButtonWidget b = new MapMenuButtonWidget(ctx);
-        b.setIcon(icon);
-        if (action != null) {
-            b.setOnButtonClickHandler(new gov.tak.api.widgets.IMapMenuButtonWidget.OnButtonClickHandler() {
-                @Override public boolean isSupported(Object o) { return true; }
-                @Override public void performAction(Object o) {
-                    AtakBroadcast.getInstance().sendBroadcast(new Intent(action));
-                }
-            });
+        MapMenuButtonWidget icu = buildIcuButton(menu);
+        if (icu != null) {
+            menu.addChildWidget(icu);
+            Log.d(TAG, "appended ICU button to self-marker radial");
         }
-        return b;
+        return menu;
     }
 
-    /** Rasterize a (possibly vector) plugin drawable into a base64-backed WidgetIcon. */
+    private MapMenuButtonWidget buildIcuButton(MapMenuWidget menu) {
+        try {
+            WidgetIcon icon = icon(R.drawable.ic_icu_menu);
+            if (icon == null) {
+                Log.w(TAG, "ICU button skipped — icon failed to build");
+                return null;
+            }
+            MapMenuButtonWidget btn = new MapMenuButtonWidget(appContext);
+
+            // Position/size to match sibling buttons (radialmenudemo pattern).
+            btn.setOrientation(btn.getOrientationAngle(), menu.getInnerRadius());
+            btn.setButtonSize(btn.getButtonSpan(), menu.getButtonWidth());
+            btn.setLayoutWeight(averageLayoutWeight(menu));
+
+            btn.setIcon(icon);
+            btn.setSubmenu(buildSubmenu(menu));
+            return btn;
+        } catch (Exception e) {
+            Log.e(TAG, "buildIcuButton failed", e);
+            return null;
+        }
+    }
+
+    /** Broadcast / Record / Snapshot ring shown when the ICU button is pressed. */
+    private MapMenuWidget buildSubmenu(MapMenuWidget parent) {
+        MapMenuWidget sub = new MapMenuWidget();
+        sub.setButtonWidth(parent.getButtonWidth());
+        // One ring out from the parent so the submenu clears the base radial.
+        sub.setInnerRadius(parent.getInnerRadius() + parent.getButtonWidth());
+        addSubButton(sub, R.drawable.ic_broadcast, ICUVideoDropDownReceiver.TOGGLE);
+        addSubButton(sub, R.drawable.ic_record,    ICUVideoDropDownReceiver.RECORD);
+        addSubButton(sub, R.drawable.ic_snapshot,  ICUVideoDropDownReceiver.SNAPSHOT);
+        return sub;
+    }
+
+    private void addSubButton(MapMenuWidget sub, int iconRes, final String action) {
+        WidgetIcon icon = icon(iconRes);
+        if (icon == null) return;
+        MapMenuButtonWidget b = new MapMenuButtonWidget(appContext);
+        b.setOrientation(b.getOrientationAngle(), sub.getInnerRadius());
+        b.setButtonSize(b.getButtonSpan(), sub.getButtonWidth());
+        b.setLayoutWeight(1f);
+        b.setIcon(icon);
+        b.setOnButtonClickHandler(new IMapMenuButtonWidget.OnButtonClickHandler() {
+            @Override public boolean isSupported(Object o) { return true; }
+            @Override public void performAction(Object o) {
+                AtakBroadcast.getInstance().sendBroadcast(new Intent(action));
+            }
+        });
+        sub.addChildWidget(b);
+    }
+
+    private float averageLayoutWeight(MapMenuWidget menu) {
+        float total = 0f;
+        for (IMapWidget child : menu.getChildren())
+            if (child instanceof MapMenuButtonWidget)
+                total += ((MapMenuButtonWidget) child).getLayoutWeight();
+        int n = menu.getChildWidgetCount();
+        return n > 0 ? total / n : 1f;
+    }
+
+    /** Rasterize a (vector) plugin drawable to a PNG in ATAK's cache and wrap it as a WidgetIcon. */
     private WidgetIcon icon(int iconRes) {
         try {
-            Drawable d = pluginCtx.getResources().getDrawable(iconRes, pluginCtx.getTheme());
-            if (d == null) return null;
-            Bitmap bmp = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(bmp);
-            d.setBounds(0, 0, ICON_PX, ICON_PX);
-            d.draw(c);
-
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, bos);
-            bmp.recycle();
-            String b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
-            MapDataRef ref = MapDataRef.parseUri(com.atakmap.android.maps.Base64MapDataRef.toUri(b64));
+            File png = new File(appContext.getCacheDir(), "icu_radial_" + iconRes + ".png");
+            if (!png.exists()) {
+                Drawable d = pluginCtx.getResources().getDrawable(iconRes, pluginCtx.getTheme());
+                if (d == null) return null;
+                Bitmap bmp = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888);
+                Canvas c = new Canvas(bmp);
+                d.setBounds(0, 0, ICON_PX, ICON_PX);
+                d.draw(c);
+                FileOutputStream os = new FileOutputStream(png);
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, os);
+                os.close();
+                bmp.recycle();
+            }
+            MapDataRef ref = MapDataRef.parseUri("file://" + png.getAbsolutePath());
             if (ref == null) return null;
 
-            // Same ref for every button state so no state ever dereferences a null icon.
             return new WidgetIcon.Builder()
                     .setImageRef(0, ref)
                     .setImageRef(AbstractButtonWidget.STATE_PRESSED, ref)

@@ -222,6 +222,24 @@ public class StreamStatusWidget implements AtakMapView.OnMapViewResizedListener 
         relayout();
     }
 
+    private boolean enabled = true;
+
+    /** Show/hide the whole badge (user setting). Idempotent. */
+    public void setEnabled(boolean on) {
+        if (enabled == on) return;
+        enabled = on;
+        if (on) {
+            rootLayout.addWidget(iconWidget);
+            rootLayout.addWidget(dotWidget);
+            rootLayout.addWidget(liveText);
+            mapView.post(this::relayout);
+        } else {
+            rootLayout.removeWidget(iconWidget);
+            rootLayout.removeWidget(dotWidget);
+            rootLayout.removeWidget(liveText);
+        }
+    }
+
     public void setStreaming(boolean streaming) {
         this.streaming = streaming;
         dotWidget.setIcon(streaming ? dotGreen : dotRed);
